@@ -4,32 +4,44 @@ import { api } from "../../../scripts/api.js";
 function getImageUrl(node) {
     if (!node) return null;
 
-    // 1. Priority: Use what the origin node is ALREADY showing (most reliable)
-    if (node.imgs && node.imgs.length > 0 && node.imgs[0].src) {
-        return node.imgs[0].src;
-    }
+    try {
+        // 1. Try to find image info from widgets (handles generic LoadImage types)
+        const imageWidget = node.widgets?.find(w => w.name === "image" || w.name === "image_path" || w.name === "file_path");
+        if (imageWidget && imageWidget.value && typeof imageWidget.value === "string") {
+            const typeWidget = node.widgets?.find(w => w.name === "type");
+            const type = typeWidget?.value || (node.type === "LoadImage" ? "input" : "output");
+            return api.apiURL(`/view?filename=${encodeURIComponent(imageWidget.value)}&type=${type}&subfolder=`);
+        }
 
-    // 2. Secondary: Sniff for image widgets (handles cases where preview hasn't rendered yet)
-    const imageWidget = node.widgets?.find(w => w.name === "image" || w.name === "image_path" || w.name === "file_path");
-    if (imageWidget && imageWidget.value && typeof imageWidget.value === "string") {
-        const typeWidget = node.widgets.find(w => w.name === "type");
-        const type = typeWidget ? typeWidget.value : (node.type === "LoadImage" ? "input" : "output");
-        return api.apiURL(`/view?filename=${encodeURIComponent(imageWidget.value)}&type=${type}&subfolder=`);
-    }
+        // 2. Fallback to standard ComfyUI preview images (node.imgs)
+        if (node.imgs && node.imgs.length > 0 && node.imgs[0].src) {
+            let src = node.imgs[0].src;
+            // Strip random timestamps if present to stabilize comparison
+            if (src.includes("&t=")) {
+                src = src.split("&t=")[0];
+            }
+            return src;
+        }
 
-    // 3. Last resort: internal state or fallback
-    if (node.preview_src) return node.preview_src;
-    if (node.image && node.image.src) return node.image.src;
+        // 3. Last ditch sniffs
+        if (node.preview_src) return node.preview_src;
+        if (node.image && node.image.src) return node.image.src;
+    } catch (e) {
+        console.warn("FreeDragCrop: Error in getImageUrl", e);
+    }
 
     return null;
 }
 
-// Robust URL comparison to avoid infinite reloads
+// Robust URL comparison: Strip timestamps and normalize to absolute
 function isSameUrl(url1, url2) {
     if (!url1 || !url2) return url1 === url2;
-    // Normalize both URLs to absolute before comparison
     const normalize = (u) => {
-        try { return new URL(u, window.location.href).href; } catch (e) { return u; }
+        try {
+            let href = new URL(u, window.location.href).href;
+            // Strip common cache busters like &t= or &rand=
+            return href.split(/[?&]t=/)[0].split(/[?&]rand=/)[0];
+        } catch (e) { return u; }
     };
     return normalize(url1) === normalize(url2);
 }
@@ -117,16 +129,19 @@ app.registerExtension({
                     if (!origin) return;
 
                     const url = getImageUrl(origin);
-                    if (url && !isSameUrl(this.image.src, url)) {
-                        this.image.src = url;
-                        this.imageLoaded = false;
-                        this.setDirtyCanvas(true);
-                        console.log("FreeDragCrop: Loading new image from upstream", url);
-                    } else if (url && !this.imageLoaded && this.image.complete) {
-                        // RECOVERY: Image is done loading but state says it isn't
-                        if (this.image.naturalWidth > 0) {
-                            console.log("FreeDragCrop: Recovery - image complete but onload missed");
-                            this.image.onload();
+                    if (url) {
+                        const current = this.image.src;
+                        if (!isSameUrl(current, url)) {
+                            console.log("FreeDragCrop: New image detected, updating...", url);
+                            this.image.src = url;
+                            this.imageLoaded = false;
+                            this.setDirtyCanvas(true);
+                        } else if (!this.imageLoaded && this.image.complete) {
+                            // Recovery: Image is done but state is stale
+                            if (this.image.naturalWidth > 0) {
+                                console.log("FreeDragCrop: Recovery - image complete but node state stale");
+                                this.image.onload();
+                            }
                         }
                     }
                 }
@@ -520,10 +535,32 @@ app.registerExtension({
                 node.applyAspectRatio();
             });
 
+            node.addWidget("button", "Force Refresh Image", null, () => {
+                const linkId = node.inputs[0]?.link;
+                if (linkId) {
+                    const link = app.graph.links[linkId];
+                    if (link) {
+                        const origin = app.graph.getNodeById(link.origin_id);
+                        if (origin) {
+                            const url = getImageUrl(origin);
+                            if (url) {
+                                console.log("FreeDragCrop: Force refresh requested", url);
+                                node.image.src = ""; // Clear
+                                setTimeout(() => {
+                                    node.image.src = url;
+                                    node.imageLoaded = false;
+                                    node.setDirtyCanvas(true);
+                                }, 10);
+                            }
+                        }
+                    }
+                }
+            });
+
             // 2. PREVIEW WIDGET LAST (Takes all remaining space)
             node.addCustomWidget(widget);
 
-            node.size = [400, 600];
+            node.size = [400, 650];
         };
     }
 });
