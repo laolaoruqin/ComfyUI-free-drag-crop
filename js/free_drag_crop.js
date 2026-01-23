@@ -4,24 +4,21 @@ import { api } from "../../../scripts/api.js";
 function getImageUrl(node) {
     if (!node) return null;
 
-    // 1. Try to find image info from widgets (LoadImage etc.)
-    const imageWidget = node.widgets?.find(w => w.name === "image");
+    // 1. Priority: Use what the origin node is ALREADY showing (most reliable)
+    if (node.imgs && node.imgs.length > 0 && node.imgs[0].src) {
+        return node.imgs[0].src;
+    }
+
+    // 2. Secondary: Sniff for image widgets (handles cases where preview hasn't rendered yet)
+    const imageWidget = node.widgets?.find(w => w.name === "image" || w.name === "image_path" || w.name === "file_path");
     if (imageWidget && imageWidget.value && typeof imageWidget.value === "string") {
-        // Some nodes don't have a 'type' widget, default to input for LoadImage
         const typeWidget = node.widgets.find(w => w.name === "type");
         const type = typeWidget ? typeWidget.value : (node.type === "LoadImage" ? "input" : "output");
         return api.apiURL(`/view?filename=${encodeURIComponent(imageWidget.value)}&type=${type}&subfolder=`);
     }
 
-    // 2. Check for node.imgs (standard ComfyUI preview images)
-    if (node.imgs && node.imgs.length > 0) {
-        return node.imgs[0].src;
-    }
-
-    // 3. Feature: check for node.preview_src or similar
+    // 3. Last resort: internal state or fallback
     if (node.preview_src) return node.preview_src;
-
-    // 4. Fallback to canvas node images
     if (node.image && node.image.src) return node.image.src;
 
     return null;
@@ -112,18 +109,23 @@ app.registerExtension({
             // onDrawBackground is called frequently by the canvas.
             node.onDrawBackground = function (ctx) {
                 if (this.dragging) return;
-                const link = this.inputs[0]?.link;
-                if (link) {
-                    const origin = app.graph.getNodeById(app.graph.links[link].origin_id);
+                const linkId = this.inputs[0]?.link;
+                if (linkId) {
+                    const link = app.graph.links[linkId];
+                    if (!link) return;
+                    const origin = app.graph.getNodeById(link.origin_id);
+                    if (!origin) return;
+
                     const url = getImageUrl(origin);
                     if (url && !isSameUrl(this.image.src, url)) {
                         this.image.src = url;
                         this.imageLoaded = false;
                         this.setDirtyCanvas(true);
-                    } else if (url && !this.imageLoaded && !this.image.complete) {
-                        // Force check if it should be loaded but isn't
-                        // This helps if onload was somehow missed
+                        console.log("FreeDragCrop: Loading new image from upstream", url);
+                    } else if (url && !this.imageLoaded && this.image.complete) {
+                        // RECOVERY: Image is done loading but state says it isn't
                         if (this.image.naturalWidth > 0) {
+                            console.log("FreeDragCrop: Recovery - image complete but onload missed");
                             this.image.onload();
                         }
                     }
