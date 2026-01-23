@@ -7,7 +7,9 @@ function getImageUrl(node) {
     // 1. Try to find image info from widgets (LoadImage etc.)
     const imageWidget = node.widgets?.find(w => w.name === "image");
     if (imageWidget && imageWidget.value && typeof imageWidget.value === "string") {
-        const type = node.type === "LoadImage" ? "input" : "output";
+        // Some nodes don't have a 'type' widget, default to input for LoadImage
+        const typeWidget = node.widgets.find(w => w.name === "type");
+        const type = typeWidget ? typeWidget.value : (node.type === "LoadImage" ? "input" : "output");
         return api.apiURL(`/view?filename=${encodeURIComponent(imageWidget.value)}&type=${type}&subfolder=`);
     }
 
@@ -16,7 +18,10 @@ function getImageUrl(node) {
         return node.imgs[0].src;
     }
 
-    // 3. Fallback to canvas node images
+    // 3. Feature: check for node.preview_src or similar
+    if (node.preview_src) return node.preview_src;
+
+    // 4. Fallback to canvas node images
     if (node.image && node.image.src) return node.image.src;
 
     return null;
@@ -25,13 +30,11 @@ function getImageUrl(node) {
 // Robust URL comparison to avoid infinite reloads
 function isSameUrl(url1, url2) {
     if (!url1 || !url2) return url1 === url2;
-    try {
-        const full1 = new URL(url1, window.location.href).href;
-        const full2 = new URL(url2, window.location.href).href;
-        return full1 === full2;
-    } catch (e) {
-        return url1 === url2;
-    }
+    // Normalize both URLs to absolute before comparison
+    const normalize = (u) => {
+        try { return new URL(u, window.location.href).href; } catch (e) { return u; }
+    };
+    return normalize(url1) === normalize(url2);
 }
 
 // Utility to get and cache widgets for a node
@@ -80,6 +83,12 @@ app.registerExtension({
             node.imageLoaded = false;
             node.dragging = false;
 
+            node.image.onerror = (e) => {
+                console.error("FreeDragCrop: Image failed to load", node.image.src);
+                node.imageLoaded = false;
+                node.setDirtyCanvas(true);
+            };
+
             node.image.onload = () => {
                 node.imageLoaded = true;
                 const oldW = node.properties.actualImageWidth;
@@ -103,7 +112,7 @@ app.registerExtension({
             // onDrawBackground is called frequently by the canvas.
             node.onDrawBackground = function (ctx) {
                 if (this.dragging) return;
-                const link = this.inputs[0].link;
+                const link = this.inputs[0]?.link;
                 if (link) {
                     const origin = app.graph.getNodeById(app.graph.links[link].origin_id);
                     const url = getImageUrl(origin);
@@ -111,6 +120,12 @@ app.registerExtension({
                         this.image.src = url;
                         this.imageLoaded = false;
                         this.setDirtyCanvas(true);
+                    } else if (url && !this.imageLoaded && !this.image.complete) {
+                        // Force check if it should be loaded but isn't
+                        // This helps if onload was somehow missed
+                        if (this.image.naturalWidth > 0) {
+                            this.image.onload();
+                        }
                     }
                 }
             };
