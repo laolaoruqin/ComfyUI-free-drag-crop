@@ -15,7 +15,7 @@ class FreeDragCrop:
             },
             "optional": {
                 "mask": ("MASK",),
-                "aspect_ratio": ("STRING", {"default": "1:1"}),
+                "aspect_ratio": (["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2", "4:5", "5:4", "21:9", "9:21"], {"default": "1:1"}),
                 "ratio_lock": ("BOOLEAN", {"default": False}),
             }
         }
