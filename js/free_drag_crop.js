@@ -58,14 +58,7 @@ function getImageUrl(node, depth = 0) {
     } catch (e) { } return null;
 }
 
-// Global listener for execution completion to trigger instant refresh
-api.addEventListener("executed", (e) => {
-    const node = app.graph.getNodeById(e.node);
-    if (node && node.type === "FreeDragCrop") {
-        if (node.onDrawBackground) node.onDrawBackground();
-        node.setDirtyCanvas(true);
-    }
-});
+// Global listener removed - specific onExecuted on node instance is used instead
 
 function isSameUrl(u1, u2) {
     if (!u1 || !u2) return u1 === u2;
@@ -332,19 +325,6 @@ app.registerExtension({
                 // No more auto-backtracking! 
                 // Canvas only updates via onExecuted or Manual "Reload" button.
             };
-
-            node.addWidget("button", "Reload Source Image", null, () => {
-                const link = app.graph.links[this.inputs[0]?.link];
-                if (link) {
-                    const url = getImageUrl(app.graph.getNodeById(link.origin_id));
-                    if (url) {
-                        this.image.src = url;
-                        this.imageLoaded = false;
-                        this.backendUrl = null; // Reset sticky backend on manual reload
-                        this.setDirtyCanvas(true);
-                    }
-                }
-            });
 
             // 4. UI Setup
             const canvasWidget = {

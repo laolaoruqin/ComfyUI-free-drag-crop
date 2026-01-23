@@ -4,6 +4,8 @@ from PIL import Image
 import folder_paths
 import os
 import json
+import random
+import string
 
 class FreeDragCrop:
     @classmethod
@@ -70,8 +72,6 @@ class FreeDragCrop:
         
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path("free_drag_crop_preview", folder_paths.get_temp_directory())
         
-        import random
-        import string
         rand = ''.join(random.choices(string.ascii_lowercase + string.digits, k=5))
         preview_file = f"{filename}_{counter:05}_{rand}.png"
         
