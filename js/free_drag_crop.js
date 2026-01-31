@@ -1,78 +1,19 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
-/**
- * Robustly get the image URL from a node.
- */
-function getImageUrl(node, depth = 0) {
-    if (!node || depth > 5) return null;
-    try {
-        // Priority 1: Check ComfyUI execution output across all slots
-        const output = app.node_outputs?.[node.id];
-        if (output) {
-            if (output.images && output.images.length > 0) {
-                const img = output.images[0];
-                return api.apiURL(`/view?filename=${encodeURIComponent(img.filename)}&type=${img.type}&subfolder=${encodeURIComponent(img.subfolder)}`);
-            }
-            for (const key in output) {
-                const slot = output[key];
-                if (slot && slot.images && slot.images.length > 0) {
-                    const img = slot.images[0];
-                    return api.apiURL(`/view?filename=${encodeURIComponent(img.filename)}&type=${img.type}&subfolder=${encodeURIComponent(img.subfolder)}`);
-                }
-            }
-        }
-
-        // Priority 2: Check node.imgs (internal previews)
-        if (node.imgs && node.imgs.length > 0 && node.imgs[0].src) return node.imgs[0].src;
-
-        // Priority 3: Check widgets
-        const findWidget = (n) => (node.widgets || []).find(w => w.name === n || w.label === n);
-        const imageWidget = findWidget("image") || findWidget("image_path") || findWidget("file_path");
-
-        if (imageWidget && imageWidget.value) {
-            const t = (node.type || "").toLowerCase(), c = (node.comfyClass || "").toLowerCase();
-            const isLoad = t.includes("load") || c.includes("load");
-            let filename = "", subfolder = "", type = isLoad ? "input" : "output";
-            const val = imageWidget.value;
-
-            if (typeof val === "string") {
-                filename = val.trim().replace(/^"|"$/g, "");
-                if (filename.includes("/") || filename.includes("\\")) {
-                    const parts = filename.split(/[/\\]/);
-                    filename = parts.pop(); subfolder = parts.join("/");
-                }
-            } else if (typeof val === "object" && val.filename) {
-                filename = val.filename; subfolder = val.subfolder || "";
-                type = val.type || type;
-            }
-            if (filename) return api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=${type}&subfolder=${encodeURIComponent(subfolder)}`);
-        }
-
-        // Priority 4: Backtrack (Recursive)
-        const imageInput = (node.inputs || []).find(i => i.name.toLowerCase().includes("image") || i.type === "IMAGE");
-        if (imageInput && imageInput.link) {
-            const originNode = app.graph.getNodeById(app.graph.links[imageInput.link].origin_id);
-            if (originNode) return getImageUrl(originNode, depth + 1);
-        }
-    } catch (e) { } return null;
-}
-
-// Global listener removed - specific onExecuted on node instance is used instead
-
-function isSameUrl(u1, u2) {
-    if (!u1 || !u2) return u1 === u2;
-    try {
-        const n1 = new URL(u1, window.location.href), n2 = new URL(u2, window.location.href);
-        return n1.pathname === n2.pathname && n1.search === n2.search;
-    } catch (e) { return u1 === u2; }
-}
-
+// Utility: Safe parsing of Aspect Ratio
 const parseRatio = (r) => {
     if (!r) return 1; if (typeof r === 'number') return r;
-    const s = String(r).replace(/\//g, ":"), p = s.split(":");
-    return p.length === 2 ? (parseFloat(p[0]) / parseFloat(p[1]) || 1) : (parseFloat(s) || 1);
+    try {
+        const s = String(r).replace(/\//g, ":"), p = s.split(":");
+        if (p.length === 2) {
+            const n = parseFloat(p[0]), d = parseFloat(p[1]);
+            return (n > 0 && d > 0) ? n / d : 1;
+        }
+        return parseFloat(s) || 1;
+    } catch (e) { return 1; }
 };
+
 
 app.registerExtension({
     name: "FreeDragCrop.Antigravity",
@@ -96,10 +37,21 @@ app.registerExtension({
             node.dragging = false;
             node.dragMode = null;
             node._isSyncing = false;
+            node._lastRedraw = 0;
+
+            // Ensure we don't add duplicate preview widgets
+            const existing = node.widgets?.find(w => w.name === "crop_preview");
+            if (existing) {
+                const idx = node.widgets.indexOf(existing);
+                node.widgets.splice(idx, 1);
+            }
 
             node.image.onload = () => {
-                const iw = node.image.width, ih = node.image.height;
+                // Properties actualImageWidth/Height already updated in onExecuted for accuracy
+                const iw = node.properties.actualImageWidth || node.image.width || 1;
+                const ih = node.properties.actualImageHeight || node.image.height || 1;
                 const ow = node.properties.actualImageWidth, oh = node.properties.actualImageHeight;
+
 
                 node.imageLoaded = true;
                 node.properties.actualImageWidth = iw;
@@ -111,6 +63,15 @@ app.registerExtension({
                 }
                 node.setDirtyCanvas(true);
             };
+
+
+            // Double-buffering for image loading to prevent "No Image" flash
+            node.imageLoader = new Image();
+            node.imageLoader.onload = () => {
+                node.image.src = node.imageLoader.src;
+                // node.image.onload (above) will handle the swap and dirty canvas
+            };
+
 
             // 2. Logic Methods
             node.syncWidgetsFromProperties = function () {
@@ -249,11 +210,28 @@ app.registerExtension({
             node.onMouseMove = function (e, pos) {
                 const imgPos = this.convertToImageSpace(pos);
                 if (!this.dragging) {
-                    const hit = imgPos ? this.getHitArea(imgPos) : null;
-                    const cursors = { move: "move", tl: "nwse-resize", br: "nwse-resize", tr: "nesw-resize", bl: "nesw-resize", t: "ns-resize", b: "ns-resize", l: "ew-resize", r: "ew-resize" };
-                    app.canvas.canvas.style.cursor = hit ? cursors[hit] : "default";
-                    return !!hit;
+                    // Only change cursor if mouse is over the interactive preview area
+                    // and not panning (left/middle button NOT pressed)
+                    if (imgPos && e.buttons === 0) {
+                        const hit = this.getHitArea(imgPos);
+                        if (hit) {
+                            const cursors = {
+                                move: "move",
+                                tl: "nwse-resize", br: "nwse-resize", tr: "nesw-resize", bl: "nesw-resize",
+                                t: "ns-resize", b: "ns-resize", l: "ew-resize", r: "ew-resize"
+                            };
+                            if (app.canvas.canvas.style.cursor !== cursors[hit]) {
+                                app.canvas.canvas.style.cursor = cursors[hit];
+                            }
+                            // Don't return true on hover only - allow standard LiteGraph/ComfyUI events to pass
+                        }
+                    } else if (app.canvas.canvas.style.cursor !== "default") {
+                        app.canvas.canvas.style.cursor = "default";
+                    }
+                    return false;
                 }
+
+
                 if (e.buttons === 0) { this.onMouseUp(e); return false; }
                 if (!imgPos) return;
 
@@ -288,17 +266,32 @@ app.registerExtension({
                 }
                 nx1 = Math.max(0, Math.min(iw - 1, nx1)); ny1 = Math.max(0, Math.min(ih - 1, ny1));
                 nx2 = Math.max(nx1 + 1, Math.min(iw, nx2)); ny2 = Math.max(ny1 + 1, Math.min(ih, ny2));
-                this.properties.dragStart = [Math.round(nx1), Math.round(ny1)];
-                this.properties.dragEnd = [Math.round(nx2), Math.round(ny2)];
-                this.syncWidgetsFromProperties();
-                this.setDirtyCanvas(true);
+
+                const newStart = [Math.round(nx1), Math.round(ny1)];
+                const newEnd = [Math.round(nx2), Math.round(ny2)];
+
+                if (newStart[0] !== this.properties.dragStart[0] ||
+                    newStart[1] !== this.properties.dragStart[1] ||
+                    newEnd[0] !== this.properties.dragEnd[0] ||
+                    newEnd[1] !== this.properties.dragEnd[1]) {
+
+                    this.properties.dragStart = newStart;
+                    this.properties.dragEnd = newEnd;
+
+                    // SILENT UPDATE: Don't sync widgets during drag to prevent high-frequency DOM/Flow updates
+                    // The canvas will still redraw naturally through LiteGraph's interaction loop
+                }
                 return true;
             };
+
+
 
             node.onMouseUp = function (e) {
                 if (this.dragging) {
                     this.dragging = false; this.dragMode = null;
                     app.canvas.canvas.style.cursor = "default";
+                    // Only sync to widgets and trigger full redraw on release
+                    this.syncWidgetsFromProperties();
                     this.setDirtyCanvas(true);
                     return true;
                 }
@@ -312,13 +305,21 @@ app.registerExtension({
                     const img = message.images[0];
                     const url = api.apiURL(`/view?filename=${encodeURIComponent(img.filename)}&type=${img.type}&subfolder=${encodeURIComponent(img.subfolder || "")}`);
                     this.backendUrl = url;
-                    if (this.image.src !== url) {
-                        this.image.src = url;
-                        this.imageLoaded = false;
+
+                    if (message.original_size) {
+                        this.properties.actualImageWidth = message.original_size[0];
+                        this.properties.actualImageHeight = message.original_size[1];
                     }
-                    this.setDirtyCanvas(true);
+
+                    if (this.imageLoader.src !== url) {
+
+                        // Cleanup old object URL if it existed (though here strictly api URLs)
+                        this.imageLoader.src = url;
+                    }
                 }
             };
+
+
 
             node.onDrawBackground = function () {
                 if (this.dragging) return;
@@ -327,45 +328,87 @@ app.registerExtension({
             };
 
             // 4. UI Setup
-            const canvasWidget = {
+            node.addCustomWidget({
                 type: "custom_canvas", name: "crop_preview",
                 draw(ctx, node, width, y) {
-                    const margin = 10, drawW = width - margin * 2, drawH = Math.max(150, node.size[1] - y - margin * 2);
-                    const startY = y + margin;
-                    ctx.fillStyle = "#161616"; ctx.fillRect(margin, startY, drawW, drawH);
-                    if (!node.imageLoaded) { ctx.fillStyle = "#666"; ctx.textAlign = "center"; ctx.fillText("No Image", margin + drawW / 2, startY + drawH / 2); return; }
-                    const imgAR = node.image.width / node.image.height, areaAR = drawW / drawH;
-                    let pw, ph, px, py;
-                    if (imgAR > areaAR) { pw = drawW; ph = drawW / imgAR; px = margin; py = startY + (drawH - ph) / 2; }
-                    else { ph = drawH; pw = drawH * imgAR; px = margin + (drawW - pw) / 2; py = startY; }
-                    const scale = pw / node.image.width;
-                    node.previewArea = { x: px, y: py, scale, width: pw, height: ph };
-                    ctx.drawImage(node.image, px, py, pw, ph);
-                    const [x1, y1] = node.properties.dragStart, [x2, y2] = node.properties.dragEnd;
-                    const rx = px + x1 * scale, ry = py + y1 * scale, rw = (x2 - x1) * scale, rh = (y2 - y1) * scale;
-                    ctx.save(); ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.beginPath(); ctx.rect(px, py, pw, ph); ctx.rect(rx, ry, rw, rh); ctx.fill("evenodd"); ctx.restore();
-                    ctx.strokeStyle = "#0f0"; ctx.lineWidth = 2; ctx.strokeRect(rx, ry, rw, rh);
+                    try {
+                        const margin = 10, drawW = width - margin * 2;
+                        const drawH = Math.max(150, node.size[1] - y - margin * 2);
+                        if (!isFinite(drawH) || drawH <= 0 || !isFinite(drawW) || drawW <= 0) return;
 
-                    // Center crosshair
-                    ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.beginPath();
-                    ctx.moveTo(rx + rw / 2 - 10, ry + rh / 2); ctx.lineTo(rx + rw / 2 + 10, ry + rh / 2);
-                    ctx.moveTo(rx + rw / 2, ry + rh / 2 - 10); ctx.lineTo(rx + rw / 2, ry + rh / 2 + 10); ctx.stroke();
+                        const startY = y + margin;
+                        ctx.fillStyle = "#161616"; ctx.fillRect(margin, startY, drawW, drawH);
 
-                    // Image Info Overlay (Pixel & Percentage)
-                    const iw = node.image.width, ih = node.image.height;
-                    const cw = Math.round(x2 - x1), ch = Math.round(y2 - y1);
-                    const perW = Math.round((cw / iw) * 100), perH = Math.round((ch / ih) * 100);
+                        if (!node.imageLoaded || !node.image.width) {
+                            ctx.fillStyle = "#666"; ctx.textAlign = "center";
+                            ctx.fillText("Loading...", margin + drawW / 2, startY + drawH / 2);
+                            return;
+                        }
 
-                    ctx.save();
-                    ctx.font = "bold 14px Arial"; ctx.textAlign = "center";
-                    ctx.shadowColor = "black"; ctx.shadowBlur = 4;
-                    ctx.fillStyle = "#aaff00";
-                    ctx.fillText(`${perW} × ${perH} %`, px + pw / 2, py + ph / 2 + 5);
-                    ctx.fillText(`${cw} × ${ch} px`, px + pw / 2, py + ph / 2 + 22);
-                    ctx.restore();
+                        const imgAR = node.image.width / node.image.height;
+                        const areaAR = drawW / drawH;
+                        let pw, ph, px, py;
+
+                        if (imgAR > areaAR) {
+                            pw = drawW; ph = drawW / imgAR;
+                            px = margin; py = startY + (drawH - ph) / 2;
+                        } else {
+                            ph = drawH; pw = drawH * imgAR;
+                            px = margin + (drawW - pw) / 2; py = startY;
+                        }
+
+                        // Scale is based on the original image dimensions for accurate mapping
+                        const originalW = node.properties.actualImageWidth || node.image.width || 1;
+                        const scale = pw / originalW;
+
+                        node.previewArea = { x: px, y: py, scale, width: pw, height: ph };
+
+                        ctx.drawImage(node.image, px, py, pw, ph);
+                        const [x1, y1] = node.properties.dragStart, [x2, y2] = node.properties.dragEnd;
+                        const rx = px + x1 * scale, ry = py + y1 * scale, rw = (x2 - x1) * scale, rh = (y2 - y1) * scale;
+
+                        ctx.save();
+                        ctx.fillStyle = "rgba(0,0,0,0.6)";
+                        ctx.beginPath();
+                        ctx.rect(px, py, pw, ph);
+                        ctx.rect(rx, ry, rw, rh);
+                        ctx.fill("evenodd");
+                        ctx.restore();
+
+                        ctx.strokeStyle = "#0f0"; ctx.lineWidth = 2;
+                        ctx.strokeRect(rx, ry, rw, rh);
+
+                        // Center crosshair
+                        ctx.strokeStyle = "rgba(255,255,255,0.5)";
+                        ctx.beginPath();
+                        ctx.moveTo(rx + rw / 2 - 10, ry + rh / 2); ctx.lineTo(rx + rw / 2 + 10, ry + rh / 2);
+                        ctx.moveTo(rx + rw / 2, ry + rh / 2 - 10); ctx.lineTo(rx + rw / 2, ry + rh / 2 + 10);
+                        ctx.stroke();
+
+                        // Image Info Overlay (Pixel & Percentage)
+                        const iw = node.image.width || 1, ih = node.image.height || 1;
+                        const cw = Math.round(x2 - x1), ch = Math.round(y2 - y1);
+                        const perW = Math.round((cw / iw) * 100), perH = Math.round((ch / ih) * 100);
+
+                        ctx.save();
+                        ctx.font = "bold 14px Arial"; ctx.textAlign = "center";
+
+                        // Text Outline for readability without background box
+                        ctx.strokeStyle = "black";
+                        ctx.lineWidth = 3;
+                        ctx.strokeText(`${perW} × ${perH} %`, px + pw / 2, py + ph / 2 + 5);
+                        ctx.strokeText(`${cw} × ${ch} px`, px + pw / 2, py + ph / 2 + 22);
+
+                        ctx.fillStyle = "#aaff00";
+                        ctx.fillText(`${perW} × ${perH} %`, px + pw / 2, py + ph / 2 + 5);
+                        ctx.fillText(`${cw} × ${ch} px`, px + pw / 2, py + ph / 2 + 22);
+                        ctx.restore();
+                    } catch (e) {
+                        console.error("FreeDragCrop draw error:", e);
+                    }
                 },
                 computeSize(width) { return [width, -1]; }
-            };
+            });
 
             node.addWidget("combo", "Ratio Presets", "Custom", (v) => {
                 if (v && v !== "Custom" && !node._isSyncing) {
@@ -387,7 +430,8 @@ app.registerExtension({
                 node.syncWidgetsFromProperties(); node.setDirtyCanvas(true);
             });
             node.addWidget("button", "Apply Ratio & Center", null, () => node.applyAspectRatio());
-            node.addCustomWidget(canvasWidget);
+            // Widget already added inside the custom function above - removing the redundant addCustomWidget(canvasWidget)
+
             node.size = [420, 910];
         };
     }

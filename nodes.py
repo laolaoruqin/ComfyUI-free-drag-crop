@@ -70,6 +70,14 @@ class FreeDragCrop:
         preview_array = 255. * preview_tensor.cpu().numpy()
         preview_img = Image.fromarray(np.clip(preview_array, 0, 255).astype(np.uint8))
         
+        # Memory Optimization: Downscale preview if it's too large
+        MAX_PREVIEW_SIZE = 1600
+        pw, ph = preview_img.size
+        if pw > MAX_PREVIEW_SIZE or ph > MAX_PREVIEW_SIZE:
+            scale = MAX_PREVIEW_SIZE / max(pw, ph)
+            new_size = (int(pw * scale), int(ph * scale))
+            preview_img = preview_img.resize(new_size, Image.Resampling.LANCZOS)
+
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path("free_drag_crop_preview", folder_paths.get_temp_directory())
         
         rand = ''.join(random.choices(string.ascii_lowercase + string.digits, k=5))
@@ -83,7 +91,10 @@ class FreeDragCrop:
         })
 
         return {
-            "ui": {"images": preview_results},
+            "ui": {
+                "images": preview_results,
+                "original_size": [int(w), int(h)]
+            },
             "result": (cropped_image, cropped_mask, json.dumps(crop_json))
         }
 
