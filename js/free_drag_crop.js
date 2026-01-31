@@ -163,12 +163,14 @@ app.registerExtension({
 
             node.onMouseDown = function (e, pos) {
                 if (!this.imageLoaded) return false;
+
+                // 1. Handle Compact Button Row clicks (Hit testing based on local y)
                 if (this._btnAreas) {
                     for (const btn of this._btnAreas) {
                         if (pos[0] >= btn.x && pos[0] <= btn.x + btn.w && pos[1] >= btn.y && pos[1] <= btn.y + btn.h) {
                             if (btn.id === 0) this.applyAspectRatio("Full");
                             else if (btn.id === 1) {
-                                const iw = this.image.width, ih = this.image.height;
+                                const iw = this.properties.actualImageWidth, ih = this.properties.actualImageHeight;
                                 const [x1, y1] = this.properties.dragStart, [x2, y2] = this.properties.dragEnd;
                                 const cw = x2 - x1, ch = y2 - y1;
                                 this.properties.dragStart = [(iw - cw) / 2, (ih - ch) / 2];
@@ -179,6 +181,8 @@ app.registerExtension({
                         }
                     }
                 }
+
+                // 2. Handle Image interaction
                 const imgPos = this.convertToImageSpace(pos);
                 if (!imgPos) return false;
                 const hit = this.getHitArea(imgPos);
@@ -191,8 +195,8 @@ app.registerExtension({
             };
 
             node.onMouseMove = function (e, pos) {
-                const imgPos = this.convertToImageSpace(pos);
                 if (!this.dragging) {
+                    // Button hover
                     if (this._btnAreas && e.buttons === 0) {
                         for (const btn of this._btnAreas) {
                             if (pos[0] >= btn.x && pos[0] <= btn.x + btn.w && pos[1] >= btn.y && pos[1] <= btn.y + btn.h) {
@@ -200,23 +204,31 @@ app.registerExtension({
                             }
                         }
                     }
+                    // Image hover
+                    const imgPos = this.convertToImageSpace(pos);
                     if (imgPos && e.buttons === 0) {
                         const hit = this.getHitArea(imgPos);
                         if (hit) {
                             const cursors = { move: "move", tl: "nwse-resize", br: "nwse-resize", tr: "nesw-resize", bl: "nesw-resize", t: "ns-resize", b: "ns-resize", l: "ew-resize", r: "ew-resize" };
                             if (app.canvas.canvas.style.cursor !== cursors[hit]) app.canvas.canvas.style.cursor = cursors[hit];
+                            return false;
                         }
-                    } else if (app.canvas.canvas.style.cursor !== "default") app.canvas.canvas.style.cursor = "default";
+                    }
+                    if (app.canvas.canvas.style.cursor !== "default") app.canvas.canvas.style.cursor = "default";
                     return false;
                 }
+
                 if (e.buttons === 0) { this.onMouseUp(e); return false; }
+                const imgPos = this.convertToImageSpace(pos);
                 if (!imgPos) return;
+
                 const dx = imgPos[0] - this.dragStartImg[0], dy = imgPos[1] - this.dragStartImg[1];
                 let [nx1, ny1] = [...this.origStart], [nx2, ny2] = [...this.origEnd];
                 const iw = this.properties.actualImageWidth, ih = this.properties.actualImageHeight;
                 const find = (n) => this.widgets?.find(w => w.name === n);
                 const isLocked = find("ratio_lock")?.value;
                 const ratio = isLocked ? parseRatio(find("aspect_ratio")?.value || "1:1") : 1;
+
                 if (this.dragMode === "move") {
                     const w = nx2 - nx1, h = ny2 - ny1;
                     nx1 = Math.max(0, Math.min(iw - w, nx1 + dx)); ny1 = Math.max(0, Math.min(ih - h, ny1 + dy));
@@ -232,10 +244,6 @@ app.registerExtension({
                             if (Math.abs(dx) * ratio > Math.abs(dy)) { nh = nw / ratio; if (this.dragMode.includes("t")) ny1 = ny2 - nh; else ny2 = ny1 + nh; }
                             else { nw = nh * ratio; if (this.dragMode.includes("l")) nx1 = nx2 - nw; else nx2 = nx1 + nw; }
                         }
-                        if (nx1 < 0) { const d = -nx1; nx1 = 0; if (this.dragMode.includes("t")) ny1 += d / ratio; else ny2 -= d / ratio; }
-                        if (ny1 < 0) { const d = -ny1; ny1 = 0; if (this.dragMode.includes("l")) nx1 += d * ratio; else nx2 -= d * ratio; }
-                        if (nx2 > iw) { const d = nx2 - iw; nx2 = iw; if (this.dragMode.includes("t")) ny1 += d / ratio; else ny2 -= d / ratio; }
-                        if (ny2 > ih) { const d = ny2 - ih; ny2 = ih; if (this.dragMode.includes("l")) nx1 += d * ratio; else nx2 -= d * ratio; }
                     }
                 }
                 const newStart = [Math.round(Math.max(0, Math.min(iw - 1, nx1))), Math.round(Math.max(0, Math.min(ih - 1, ny1)))];
@@ -279,11 +287,30 @@ app.registerExtension({
             const apIdx = node.widgets.findIndex(w => w.name === "aspect_ratio");
             if (apIdx !== -1) { const p = node.widgets.pop(); node.widgets.splice(apIdx + 1, 0, p); }
 
+            // Add Buttons Row BEFORE Preview to prevent overlap
+            node.addCustomWidget({
+                type: "btn_row", name: "btn_row",
+                draw(ctx, node, width, y) {
+                    const m = 10, g = 6, btnW = (width - m * 2 - g * 2) / 3, btnH = 26;
+                    const labels = ["Full Reset", "Center", "Apply Ratio"];
+                    node._btnAreas = [];
+                    ctx.save(); ctx.font = "11px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                    for (let i = 0; i < 3; i++) {
+                        const bx = m + i * (btnW + g);
+                        ctx.fillStyle = "#2a2a2a"; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx, y, btnW, btnH, 4); else ctx.rect(bx, y, btnW, btnH); ctx.fill();
+                        ctx.strokeStyle = "#444"; ctx.stroke(); ctx.fillStyle = "#ccc"; ctx.fillText(labels[i], bx + btnW / 2, y + btnH / 2);
+                        node._btnAreas.push({ x: bx, y: y, w: btnW, h: btnH, id: i });
+                    }
+                    ctx.restore();
+                },
+                computeSize(width) { return [width, 36]; }
+            });
+
             node.addCustomWidget({
                 type: "crop_preview", name: "crop_preview",
                 draw(ctx, node, width, y) {
                     try {
-                        const margin = 10, drawW = width - margin * 2, drawH = Math.max(150, node.size[1] - y - 60);
+                        const margin = 10, drawW = width - margin * 2, drawH = Math.max(150, node.size[1] - y - margin);
                         if (drawW <= 0 || drawH <= 0) return;
                         const startY = y + margin;
                         ctx.fillStyle = "#161616"; ctx.fillRect(margin, startY, drawW, drawH);
@@ -311,24 +338,6 @@ app.registerExtension({
                     } catch (e) { console.error(e); }
                 },
                 computeSize(width) { return [width, -1]; }
-            });
-
-            node.addCustomWidget({
-                type: "btn_row", name: "btn_row",
-                draw(ctx, node, width, y) {
-                    const m = 10, g = 6, btnW = (width - m * 2 - g * 2) / 3, btnH = 26;
-                    const labels = ["Full Reset", "Center", "Apply Ratio"];
-                    node._btnAreas = [];
-                    ctx.save(); ctx.font = "11px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-                    for (let i = 0; i < 3; i++) {
-                        const bx = m + i * (btnW + g);
-                        ctx.fillStyle = "#2a2a2a"; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx, y, btnW, btnH, 4); else ctx.rect(bx, y, btnW, btnH); ctx.fill();
-                        ctx.strokeStyle = "#444"; ctx.stroke(); ctx.fillStyle = "#ccc"; ctx.fillText(labels[i], bx + btnW / 2, y + btnH / 2);
-                        node._btnAreas.push({ x: bx, y: y, w: btnW, h: btnH, id: i });
-                    }
-                    ctx.restore();
-                },
-                computeSize(width) { return [width, 32]; }
             });
 
             node.size = [420, 850];
