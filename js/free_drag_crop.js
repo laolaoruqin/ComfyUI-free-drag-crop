@@ -153,11 +153,28 @@ app.registerExtension({
             node.syncPropertiesFromWidgets = function () {
                 if (this._isSyncing || !this.widgets) return;
                 const find = (n) => this.widgets.find(w => w.name === n);
-                const iw = this.properties.actualImageWidth, ih = this.properties.actualImageHeight;
-                const l = find("crop_left")?.value || 0, r = find("crop_right")?.value || 0;
-                const t = find("crop_top")?.value || 0, b = find("crop_bottom")?.value || 0;
+
+                // Widget values are in REAL image coordinates, need to convert to preview coordinates
+                const scale = this.previewScale || 1.0;
+                const previewW = this.image.width;
+                const previewH = this.image.height;
+
+                // Get widget values (in real coordinates)
+                let l = find("crop_left")?.value || 0;
+                let r = find("crop_right")?.value || 0;
+                let t = find("crop_top")?.value || 0;
+                let b = find("crop_bottom")?.value || 0;
+
+                // Convert to preview coordinates
+                if (scale < 1.0) {
+                    l = l * scale;
+                    r = r * scale;
+                    t = t * scale;
+                    b = b * scale;
+                }
+
                 this.properties.dragStart = [l, t];
-                this.properties.dragEnd = [iw - r, ih - b];
+                this.properties.dragEnd = [previewW - r, previewH - b];
                 this.setDirtyCanvas(true);
             };
 
@@ -214,11 +231,38 @@ app.registerExtension({
 
                 if (["crop_left", "crop_right", "crop_top", "crop_bottom"].includes(name)) {
                     this.syncPropertiesFromWidgets();
+
+                    // Apply ratio lock if enabled
+                    if (find("ratio_lock")?.value) {
+                        const [x1, y1] = this.properties.dragStart, [x2, y2] = this.properties.dragEnd;
+                        const cw = Math.abs(x2 - x1), ch = Math.abs(y2 - y1);
+                        const ratio = parseRatio(find("aspect_ratio")?.value || "1:1");
+                        const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+
+                        let nw, nh;
+                        if (name === "crop_left" || name === "crop_right") {
+                            // Width changed, adjust height to maintain ratio
+                            nw = cw;
+                            nh = nw / ratio;
+                        } else {
+                            // Height changed, adjust width to maintain ratio
+                            nh = ch;
+                            nw = nh * ratio;
+                        }
+
+                        this.properties.dragStart = [cx - nw / 2, cy - nh / 2];
+                        this.properties.dragEnd = [cx + nw / 2, cy + nh / 2];
+                        this.syncWidgetsFromProperties();
+                    }
                 } else if (name === "crop_current_width" || name === "crop_current_height") {
                     const [x1, y1] = this.properties.dragStart, [x2, y2] = this.properties.dragEnd;
                     const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
-                    let nw = name === "crop_current_width" ? val : Math.abs(x2 - x1);
-                    let nh = name === "crop_current_height" ? val : Math.abs(y2 - y1);
+
+                    // Widget values are in REAL coordinates, convert to preview coordinates
+                    const scale = this.previewScale || 1.0;
+                    let nw = name === "crop_current_width" ? val * scale : Math.abs(x2 - x1);
+                    let nh = name === "crop_current_height" ? val * scale : Math.abs(y2 - y1);
+
                     if (find("ratio_lock")?.value) {
                         const r = parseRatio(find("aspect_ratio")?.value || "1:1");
                         if (name === "crop_current_width") nh = nw / r; else nw = nh * r;
