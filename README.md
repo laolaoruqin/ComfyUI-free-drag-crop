@@ -1,8 +1,8 @@
 # ComfyUI-free-drag-crop
 
-[English](#comfyui-free-drag-crop-en) | [中文](#free-drag-crop-交互式裁剪-cn)
+[English](#en) | [中文](#zh)
 
-<a name="comfyui-free-drag-crop-en"></a>
+<a id="en"></a>
 A professional, high-precision interactive cropping node for ComfyUI. Drag, resize, and lock aspect ratios directly on the node's canvas.
 
 ![Node Preview](https://github.com/laolaoruqin/ComfyUI-free-drag-crop/raw/main/preview.png)
@@ -32,7 +32,8 @@ A professional, high-precision interactive cropping node for ComfyUI. Drag, resi
 
 ---
 
-# <a name="free-drag-crop-交互式裁剪-cn"></a>Free Drag Crop (交互式裁剪)
+<a id="zh"></a>
+# Free Drag Crop (交互式裁剪)
 
 为 ComfyUI 量身定做的专业级、高精度交互式裁剪节点。直接在画板上拖拽、缩放，并支持严格的比例锁定。
 
