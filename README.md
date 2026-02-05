@@ -4,7 +4,7 @@
 
 A professional, high-precision interactive cropping node for ComfyUI. Drag, resize, and lock aspect ratios directly on the node's canvas.
 
-![Node Preview](https://github.com/Antigravity-AI/ComfyUI-free-drag-crop/raw/main/preview.png)
+![Node Preview](https://github.com/laolaoruqin/ComfyUI-free-drag-crop/raw/main/preview.png)
 
 ## Key Features 🚀
 
