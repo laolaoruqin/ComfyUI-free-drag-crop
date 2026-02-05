@@ -121,6 +121,32 @@ app.registerExtension({
                     setIfChanged("crop_bottom", ih - y2);
                     setIfChanged("crop_current_width", Math.abs(x2 - x1));
                     setIfChanged("crop_current_height", Math.abs(y2 - y1));
+
+                    // 1.5 Sync Preset Dropdown & Aspect Ratio Text (Live tracking)
+                    const presetWidget = find("Ratio Presets");
+                    const arWidget = find("aspect_ratio");
+                    const lockWidget = find("ratio_lock");
+                    const cw = Math.abs(x2 - x1);
+                    const ch = Math.abs(y2 - y1);
+
+                    // If NOT locked, update the aspect_ratio text to reflect actual current dimensions
+                    if (arWidget && (!lockWidget || !lockWidget.value)) {
+                        const newAR = Math.round(cw) + ":" + Math.round(ch);
+                        if (arWidget.value !== newAR) arWidget.value = newAR;
+                    }
+
+                    if (presetWidget && arWidget) {
+                        const currentBoxRatio = cw / ch;
+                        const textRatio = parseRatio(arWidget.value);
+                        // If dimensions don't match the selected ratio text, force "Custom"
+                        if (Math.abs(currentBoxRatio - textRatio) > 0.01) {
+                            presetWidget.value = "Custom";
+                        } else if (presetWidget.options.values.includes(arWidget.value)) {
+                            presetWidget.value = arWidget.value;
+                        } else {
+                            presetWidget.value = "Custom";
+                        }
+                    }
                 } finally { this._isSyncing = wasSyncing; }
             };
 
@@ -143,11 +169,16 @@ app.registerExtension({
                     const iw = this.properties.actualImageWidth, ih = this.properties.actualImageHeight;
                     if (!iw) return;
                     const arWidget = this.widgets.find(w => w.name === "aspect_ratio");
+                    const lockWidget = this.widgets.find(w => w.name === "ratio_lock");
+
                     if (val === "NoCrop") {
+                        if (arWidget) arWidget.value = "1:1";
+                        if (lockWidget) lockWidget.value = false; // Reset lock on NoCrop
                         this.properties.dragStart = [0, 0];
                         this.properties.dragEnd = [1, 1];
                     } else if (val === "Full") {
                         if (arWidget) arWidget.value = `${iw}:${ih}`;
+                        if (lockWidget) lockWidget.value = false; // Reset lock on Full
                         this.properties.dragStart = [0, 0]; this.properties.dragEnd = [iw, ih];
                     } else {
                         if (val && arWidget && val !== "Full" && val !== "NoCrop") arWidget.value = val;
@@ -239,14 +270,9 @@ app.registerExtension({
                 const iconR = 8;
 
                 ctx.save();
-                // Draw Icon
-                ctx.beginPath();
-                ctx.arc(iconX + iconR, iconY + iconR, iconR, 0, Math.PI * 2);
-                ctx.fillStyle = this.isHoveringHelp ? "#ff0" : "#f1c40f";
-                ctx.fill();
-
-                ctx.fillStyle = "#000";
-                ctx.font = "bold 12px Arial";
+                // Draw Icon (Yellow Question Mark)
+                ctx.fillStyle = this.isHoveringHelp ? "#fff" : "#ff0";
+                ctx.font = "bold 15px Arial";
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
                 ctx.fillText("?", iconX + iconR, iconY + iconR);
