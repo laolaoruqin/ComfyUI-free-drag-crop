@@ -26,7 +26,7 @@ A professional, high-precision interactive cropping node for ComfyUI. Drag, resi
    ```
 2. Clone this repository:
    ```bash
-   git clone https://github.com/Antigravity-AI/ComfyUI-free-drag-crop.git
+   git clone https://github.com/laolaoruqin/ComfyUI-free-drag-crop.git
    ```
 3. Restart ComfyUI.
 
@@ -55,7 +55,7 @@ A professional, high-precision interactive cropping node for ComfyUI. Drag, resi
    ```
 2. 克隆本仓库：
    ```bash
-   git clone https://github.com/Antigravity-AI/ComfyUI-free-drag-crop.git
+   git clone https://github.com/laolaoruqin/ComfyUI-free-drag-crop.git
    ```
 3. 重启 ComfyUI 即可使用。
 
