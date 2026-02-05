@@ -1,7 +1,7 @@
 [project]
 name = "free-drag-crop"
 description = "An interactive, user-friendly cropping node that allows you to drag and resize the crop area directly in the ComfyUI interface."
-version = "1.0.0"
+version = "1.0.1"
 license = {file = "LICENSE"} 
 # classifiers = [
 #     # For OS-independent nodes (works on all operating systems)
