@@ -52,21 +52,21 @@ const parseRatio = (r) => {
     return p.length === 2 ? (parseFloat(p[0]) / parseFloat(p[1]) || 1) : (parseFloat(s) || 1);
 };
 
-const TOOLTIPS = {
-    "crop_left": { en: "Pixels to crop from the left edge", zh: "从左边缘剪裁的像素长度" },
-    "crop_right": { en: "Pixels to crop from the right edge", zh: "从右边缘剪裁的像素长度" },
-    "crop_top": { en: "Pixels to crop from the top edge", zh: "从上边缘剪裁的像素长度" },
-    "crop_bottom": { en: "Pixels to crop from the bottom edge", zh: "从下边缘剪裁的像素长度" },
-    "crop_current_width": { en: "Current width of the selection area", zh: "当前选区的宽度 (像素)" },
-    "crop_current_height": { en: "Current height of the selection area", zh: "当前选区的高度 (像素)" },
-    "aspect_ratio": { en: "Target aspect ratio (W:H) for the crop", zh: "剪裁的目标宽高比 (宽:高)" },
-    "Ratio Presets": { en: "Quick presets for common aspect ratios", zh: "快速切换常用宽高比预设" },
-    "ratio_lock": { en: "Maintain aspect ratio while resizing", zh: "开启后调整大小时将锁定比例" },
-    "Full Image Crop": { en: "Expand crop to fit the whole image", zh: "全图自适应：在当前比例下扩至最大" },
-    "No Crop": { en: "Reset selection to origin (1x1 pixel)", zh: "重置选区：恢复至初始 1x1 状态" },
-    "Center Selection": { en: "Move current selection to image center", zh: "居中选区：保持大小并将位置移至中心" },
-    "Apply Ratio & Center": { en: "Apply ratio and center the selection", zh: "应用比例并居中：强制重置选区为当前比例并居中" }
-};
+const HELP_DESCRIPTIONS = [
+    { icon: "⬅️", name: "Left Crop", zh: "左剪裁", desc: "Remove pixels from the left side", zh_desc: "从左侧剪裁像素" },
+    { icon: "➡️", name: "Right Crop", zh: "右剪裁", desc: "Remove pixels from the right side", zh_desc: "从右侧剪裁像素" },
+    { icon: "⬆️", name: "Top Crop", zh: "上剪裁", desc: "Remove pixels from the top", zh_desc: "从顶部剪裁" },
+    { icon: "⬇️", name: "Bottom Crop", zh: "下剪裁", desc: "Remove pixels from the bottom", zh_desc: "从底部剪裁" },
+    { icon: "↔️", name: "Current Width", zh: "当前宽度", desc: "The width of the selection box in pixels", zh_desc: "当前选区的宽度（像素）" },
+    { icon: "↕️", name: "Current Height", zh: "当前高度", desc: "The height of the selection box in pixels", zh_desc: "当前选区的高度（像素）" },
+    { icon: "📐", name: "Aspect Ratio", zh: "宽高比", desc: "Set a specific width-to-height ratio", zh_desc: "设置特定的宽高比例" },
+    { icon: "📄", name: "Presets", zh: "预设", desc: "Quickly apply standard aspect ratios", zh_desc: "快速应用标准宽高比" },
+    { icon: "🔒", name: "Ratio Lock", zh: "锁定比例", desc: "Maintain the aspect ratio during resize", zh_desc: "调整大小时保持宽高比" },
+    { icon: "🖼️", name: "Selected Full", zh: "全图", desc: "Reset selection to cover the entire image", zh_desc: "重置选区以覆盖全图" },
+    { icon: "🔄", name: "Reset", zh: "重置", desc: "Reset selection to a minimal 1x1 size", zh_desc: "将选区重置为 1x1 大小" },
+    { icon: "🎯", name: "Center", zh: "居中", desc: "Move the current selection box to the center", zh_desc: "将当前选区移动到中心" },
+    { icon: "✅", name: "Apply", zh: "应用", desc: "Enforce current ratio and center logic", zh_desc: "强制执行当前的比例和对齐逻辑" }
+];
 
 app.registerExtension({
     name: "FreeDragCrop.Antigravity",
@@ -90,7 +90,7 @@ app.registerExtension({
             node.dragMode = null;
             node._isSyncing = false;
             node.previewScale = 1.0;
-            node.hoveredWidget = null;
+            node.isHoveringHelp = false;
 
             node.image.onload = () => {
                 node.imageLoaded = true;
@@ -233,61 +233,130 @@ app.registerExtension({
                 }
             };
 
+            node.onDrawForeground = function (ctx) {
+                const iconX = this.size[0] - 22;
+                const iconY = -LiteGraph.NODE_TITLE_HEIGHT + 5;
+                const iconR = 8;
+
+                ctx.save();
+                // Draw Icon
+                ctx.beginPath();
+                ctx.arc(iconX + iconR, iconY + iconR, iconR, 0, Math.PI * 2);
+                ctx.fillStyle = this.isHoveringHelp ? "#ff0" : "#f1c40f";
+                ctx.fill();
+
+                ctx.fillStyle = "#000";
+                ctx.font = "bold 12px Arial";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText("?", iconX + iconR, iconY + iconR);
+
+                // Draw Truly Adaptive Help Sidebar (Consistent Format + Zero Vertical Waste)
+                if (this.isHoveringHelp) {
+                    const margin = 15;
+                    const bx = this.size[0] + 15;
+                    const widgetH = 24;
+
+                    ctx.save();
+                    ctx.textBaseline = "middle";
+
+                    // 1. Pre-calculate metrics for adaptive sizing
+                    const labelFont = "bold 13px Arial";
+                    const descFont = "normal 11px Arial";
+
+                    let maxLabelW = 0;
+                    let maxDescW = 0;
+                    let minWidgetY = 10000;
+                    let lastWidgetY = 0;
+
+                    ctx.font = labelFont;
+                    HELP_DESCRIPTIONS.forEach((item, i) => {
+                        const labelText = `${item.zh} / ${item.name}`;
+                        const lw = ctx.measureText(labelText).width;
+                        if (lw > maxLabelW) maxLabelW = lw;
+
+                        ctx.font = descFont;
+                        const descText = `- ${item.zh_desc} / ${item.desc}`;
+                        const dw = ctx.measureText(descText).width;
+                        if (dw > maxDescW) maxDescW = dw;
+                        ctx.font = labelFont;
+
+                        const w = this.widgets[i];
+                        if (w && w.last_y !== undefined) {
+                            if (w.last_y < minWidgetY) minWidgetY = w.last_y;
+                            if (w.last_y > lastWidgetY) lastWidgetY = w.last_y;
+                        }
+                    });
+
+                    // 2. Derive dynamic layout variables
+                    const labelX = bx + margin + 28;
+                    const descGap = 15;
+                    const descX = labelX + maxLabelW + descGap;
+                    const boxW = (descX - bx) + maxDescW + margin;
+
+                    // Box Top & Height: Wrap from title area down to last widget
+                    const titleAreaH = 45;
+                    const by = minWidgetY - titleAreaH;
+                    const boxH = (lastWidgetY + widgetH + 10) - by;
+
+                    // 3. Render Form-Fitting Background & Border
+                    ctx.fillStyle = "rgba(0,0,0,0.95)";
+                    if (ctx.roundRect) {
+                        ctx.beginPath();
+                        ctx.roundRect(bx, by, boxW, boxH, 12);
+                        ctx.fill();
+                    } else {
+                        ctx.fillRect(bx, by, boxW, boxH);
+                    }
+
+                    ctx.strokeStyle = "#00ff44";
+                    ctx.lineWidth = 1.6;
+                    ctx.stroke();
+
+                    // 4. Render Aligned Title (Consistent Zh / En)
+                    ctx.font = "bold 16px Arial";
+                    ctx.textAlign = "left";
+                    ctx.fillStyle = "#00ff44";
+                    // Position title snugly above the first row
+                    ctx.fillText("功能说明 / Explanations", bx + margin, by + 22);
+
+                    // 5. Render Aligned Rows
+                    HELP_DESCRIPTIONS.forEach((item, i) => {
+                        const w = this.widgets[i];
+                        if (!w) return;
+
+                        const y = w.last_y + (widgetH / 2);
+
+                        // Icon
+                        ctx.font = "14px Arial";
+                        ctx.fillStyle = "#fff";
+                        ctx.fillText(item.icon, bx + margin, y);
+
+                        // Adaptive Label (Zh / En)
+                        ctx.font = labelFont;
+                        ctx.fillStyle = "#fff";
+                        ctx.fillText(`${item.zh} / ${item.name}`, labelX, y);
+
+                        // Adaptive Description (Zh / En)
+                        ctx.font = descFont;
+                        ctx.fillStyle = "#aaa";
+                        ctx.fillText(`- ${item.zh_desc} / ${item.desc}`, descX, y);
+                    });
+                    ctx.restore();
+                }
+                ctx.restore();
+            };
+
             node.onDrawBackground = function () { if (this.dragging) return; };
 
             const canvasWidget = {
                 type: "custom_canvas", name: "crop_preview",
                 draw(ctx, node, width, y) {
-                    const margin = 10, drawW = width - margin * 2;
-                    const drawH = node.imageLoaded ? Math.max(200, Math.min(400, node.size[1] - y - margin * 2)) : 200;
+                    const margin = 10, drawW = width - margin * 2, drawH = Math.max(150, node.size[1] - y - margin * 2);
                     const startY = y + margin;
                     ctx.fillStyle = "#161616"; ctx.fillRect(margin, startY, drawW, drawH);
 
-                    // Draw tooltip even when no image
-                    if (node.hoveredWidget && TOOLTIPS[node.hoveredWidget.name]) {
-                        const tip = TOOLTIPS[node.hoveredWidget.name];
-                        ctx.save();
-                        const fontHeight = 14;
-                        ctx.font = `${fontHeight}px Arial`;
-                        const mEn = ctx.measureText(tip.en);
-                        const mZh = ctx.measureText(tip.zh);
-                        const boxW = Math.max(mEn.width, mZh.width) + 20;
-                        const boxH = fontHeight * 2 + 25;
-                        const bx = margin + (drawW - boxW) / 2;
-                        const by = startY + 10;
-
-                        ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
-                        ctx.strokeStyle = "#0f0";
-                        ctx.lineWidth = 1;
-                        const r = 5;
-                        ctx.beginPath();
-                        ctx.moveTo(bx + r, by);
-                        ctx.lineTo(bx + boxW - r, by);
-                        ctx.quadraticCurveTo(bx + boxW, by, bx + boxW, by + r);
-                        ctx.lineTo(bx + boxW, by + boxH - r);
-                        ctx.quadraticCurveTo(bx + boxW, by + boxH, bx + boxW - r, by + boxH);
-                        ctx.lineTo(bx + r, by + boxH);
-                        ctx.quadraticCurveTo(bx, by + boxH, bx, by + boxH - r);
-                        ctx.lineTo(bx, by + r);
-                        ctx.quadraticCurveTo(bx, by, bx + r, by);
-                        ctx.closePath();
-                        ctx.fill();
-                        ctx.stroke();
-
-                        ctx.fillStyle = "#fff";
-                        ctx.textAlign = "center";
-                        ctx.fillText(tip.en, bx + boxW / 2, by + 20);
-                        ctx.fillStyle = "#0f0";
-                        ctx.fillText(tip.zh, bx + boxW / 2, by + 40);
-                        ctx.restore();
-                    }
-
-                    if (!node.imageLoaded) {
-                        ctx.fillStyle = "#666";
-                        ctx.textAlign = "center";
-                        ctx.fillText("No Image", margin + drawW / 2, startY + drawH / 2);
-                        return;
-                    }
+                    if (!node.imageLoaded) { ctx.fillStyle = "#666"; ctx.textAlign = "center"; ctx.fillText("No Image", margin + drawW / 2, startY + drawH / 2); return; }
                     const imgAR = node.image.width / node.image.height, areaAR = drawW / drawH;
                     let pw, ph, px, py;
                     if (imgAR > areaAR) { pw = drawW; ph = drawW / imgAR; px = margin; py = startY + (drawH - ph) / 2; }
@@ -373,37 +442,19 @@ app.registerExtension({
             };
 
             node.onMouseMove = function (e, pos) {
+                const [mx, my] = pos;
+                const iconArea = [this.size[0] - 25, -LiteGraph.NODE_TITLE_HEIGHT, 25, LiteGraph.NODE_TITLE_HEIGHT];
+                const wasHoveringHelp = this.isHoveringHelp;
+                this.isHoveringHelp = (mx >= iconArea[0] && mx <= iconArea[0] + iconArea[2] && my >= iconArea[1] && my <= iconArea[1] + iconArea[3]);
+                if (wasHoveringHelp !== this.isHoveringHelp) this.setDirtyCanvas(true);
+
+                if (this.isHoveringHelp) return true;
+
                 const imgPos = this.convertToImageSpace(pos);
                 if (!this.dragging) {
                     const hit = imgPos ? this.getHitArea(imgPos) : null;
                     const cursors = { move: "move", tl: "nwse-resize", br: "nwse-resize", tr: "nesw-resize", bl: "nesw-resize", t: "ns-resize", b: "ns-resize", l: "ew-resize", r: "ew-resize" };
                     app.canvas.canvas.style.cursor = hit ? cursors[hit] : "default";
-
-                    // Track hovered widget for tooltip - improved detection
-                    const oldHover = this.hoveredWidget;
-                    this.hoveredWidget = null;
-
-                    // Calculate widget positions more reliably
-                    const titleHeight = LiteGraph.NODE_TITLE_HEIGHT || 30;
-                    const widgetHeight = 20; // Standard widget height
-                    let currentY = titleHeight;
-
-                    if (this.widgets && pos[1] > titleHeight) {
-                        for (const w of this.widgets) {
-                            // Skip the canvas widget itself
-                            if (w.type === "custom_canvas") continue;
-
-                            const widgetBottom = currentY + widgetHeight;
-                            if (pos[1] >= currentY && pos[1] <= widgetBottom) {
-                                this.hoveredWidget = w;
-                                break;
-                            }
-                            currentY = widgetBottom;
-                        }
-                    }
-
-                    if (oldHover !== this.hoveredWidget) this.setDirtyCanvas(true);
-
                     return !!hit;
                 }
                 if (e.buttons === 0) { this.onMouseUp(e); return false; }
