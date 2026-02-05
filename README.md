@@ -1,31 +1,66 @@
-# Free Drag Crop Node for ComfyUI
+# ComfyUI-free-drag-crop
 
-An interactive, user-friendly cropping node that allows you to drag and resize the crop area directly in the ComfyUI interface.
+[English] | [中文]
 
-## Features
+A professional, high-precision interactive cropping node for ComfyUI. Drag, resize, and lock aspect ratios directly on the node's canvas.
 
-- **🚀 Immediate Preview**: See your image as soon as you connect a `Load Image` node. No need to run the graph first.
-- **🎯 Smart Centering**: 
-    - **Center Image**: Snaps the crop box to the center of the canvas.
-    - **Center Subject**: Uses a heuristic to find the main subject (non-background area) and centers the crop box on it.
-- **🔒 Aspect Ratio Lock**: Keep your desired proportions while resizing.
-- **Outputs**: 
-    - `IMAGE`: The cropped image.
-    - `MASK`: A mask matching the cropped area.
-    - `CROP_JSON`: Metadata about the crop (x, y, w, h).
+![Node Preview](https://github.com/Antigravity-AI/ComfyUI-free-drag-crop/raw/main/preview.png)
 
-## Installation
+## Key Features 🚀
 
-1. Copy this folder (`free-drag-crop`) into your ComfyUI `custom_nodes` directory.
-2. Restart ComfyUI.
+- **Interactive Canvas**: Drag to select, resize from 8-point handles, or move the entire selection area.
+- **Real-Pixel Precision**: All calculations are based on original image dimensions to prevent rounding errors or resolution drifts.
+- **Aspect Ratio Locking**: Lock your selection to a specific ratio (e.g., 16:9, 1:1) and adjust boundaries while maintaining the frame.
+- **Smart Presets**: Quick access to common ratios (4:3, 9:16, 21:9, etc.).
+- **Smart Resets**:
+  - **Full Image Crop**: Expand to the maximum possible coverage for the current ratio.
+  - **No Crop**: Reset to origin with 1x1 pixel selection (ideal for bypassing crop logic).
+- **Responsive Sync**: Real-time synchronization between the visual canvas and numeric widgets.
 
-## Usage
+## Installation 🛠️
 
-1. Add the **Free Drag Crop** node.
-2. Connect an image to the `image` input.
-3. Drag the green box in the preview to select your crop area.
-4. (Optional) Toggle **Ratio Lock** if you want to maintain a specific aspect ratio.
-5. (Optional) Use **Center Subject** to quickly find the focus of your image.
+1. Navigate to your ComfyUI custom nodes folder:
+   ```bash
+   cd ComfyUI/custom_nodes/
+   ```
+2. Clone this repository:
+   ```bash
+   git clone https://github.com/Antigravity-AI/ComfyUI-free-drag-crop.git
+   ```
+3. Restart ComfyUI.
 
 ---
-Created by Antigravity
+
+# Free Drag Crop (交互式裁剪)
+
+为 ComfyUI 量身定做的专业级、高精度交互式裁剪节点。直接在画板上拖拽、缩放，并支持严格的比例锁定。
+
+## 核心特性 🌟
+
+- **交互式画板**：支持 8 点缩放、整体移动和拖拽选择。
+- **真实像素精度**：所有计算均基于原图尺寸，彻底杜绝舍入误差造成的选区偏移。
+- **比例锁定**：支持一键开启比例锁定（如 16:9），并在缩放边界时自动维持该比例。
+- **比例预设**：内置常用比例（1:1, 4:3, 3:2, 21:9 等）快速切换。
+- **智能重置**：
+  - **Full Image Crop (全图自适应)**：在当前比例下自动扩展至最大选区。
+  - **No Crop (清空裁剪)**：一键归零，恢复至初始状态。
+- **极速响应**：画板手感顺滑，数值输入与画面实时同步。
+
+## 安装说明 📦
+
+1. 进入 ComfyUI 的自定义节点目录：
+   ```bash
+   cd ComfyUI/custom_nodes/
+   ```
+2. 克隆本仓库：
+   ```bash
+   git clone https://github.com/Antigravity-AI/ComfyUI-free-drag-crop.git
+   ```
+3. 重启 ComfyUI 即可使用。
+
+---
+
+### Technical Highlights / 技术亮点
+
+> [!TIP]
+> This node uses a high-performance rendering loop and a specialized "Resolution Stability Guard". Unlike other crop nodes that drift on large images, **Free Drag Crop** maintains sub-pixel accuracy even for 8K+ resolutions.

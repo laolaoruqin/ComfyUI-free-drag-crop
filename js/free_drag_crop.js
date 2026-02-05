@@ -1,13 +1,9 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
-/**
- * Robustly get the image URL from a node.
- */
 function getImageUrl(node, depth = 0) {
     if (!node || depth > 5) return null;
     try {
-        // Priority 1: Check ComfyUI execution output across all slots
         const output = app.node_outputs?.[node.id];
         if (output) {
             if (output.images && output.images.length > 0) {
@@ -22,20 +18,14 @@ function getImageUrl(node, depth = 0) {
                 }
             }
         }
-
-        // Priority 2: Check node.imgs (internal previews)
         if (node.imgs && node.imgs.length > 0 && node.imgs[0].src) return node.imgs[0].src;
-
-        // Priority 3: Check widgets
         const findWidget = (n) => (node.widgets || []).find(w => w.name === n || w.label === n);
         const imageWidget = findWidget("image") || findWidget("image_path") || findWidget("file_path");
-
         if (imageWidget && imageWidget.value) {
             const t = (node.type || "").toLowerCase(), c = (node.comfyClass || "").toLowerCase();
             const isLoad = t.includes("load") || c.includes("load");
             let filename = "", subfolder = "", type = isLoad ? "input" : "output";
             const val = imageWidget.value;
-
             if (typeof val === "string") {
                 filename = val.trim().replace(/^"|"$/g, "");
                 if (filename.includes("/") || filename.includes("\\")) {
@@ -48,24 +38,12 @@ function getImageUrl(node, depth = 0) {
             }
             if (filename) return api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=${type}&subfolder=${encodeURIComponent(subfolder)}`);
         }
-
-        // Priority 4: Backtrack (Recursive)
         const imageInput = (node.inputs || []).find(i => i.name.toLowerCase().includes("image") || i.type === "IMAGE");
         if (imageInput && imageInput.link) {
             const originNode = app.graph.getNodeById(app.graph.links[imageInput.link].origin_id);
             if (originNode) return getImageUrl(originNode, depth + 1);
         }
     } catch (e) { } return null;
-}
-
-// Global listener removed - specific onExecuted on node instance is used instead
-
-function isSameUrl(u1, u2) {
-    if (!u1 || !u2) return u1 === u2;
-    try {
-        const n1 = new URL(u1, window.location.href), n2 = new URL(u2, window.location.href);
-        return n1.pathname === n2.pathname && n1.search === n2.search;
-    } catch (e) { return u1 === u2; }
 }
 
 const parseRatio = (r) => {
@@ -84,209 +62,222 @@ app.registerExtension({
             onNodeCreated?.apply(this, arguments);
             const node = this;
 
-            // 1. Properties & State
             node.properties = node.properties || {};
             node.properties.dragStart = node.properties.dragStart || [0, 0];
             node.properties.dragEnd = node.properties.dragEnd || [512, 512];
-            node.properties.actualImageWidth = 512;
-            node.properties.actualImageHeight = 512;
-
-            // Store previewScale as instance variable (not in properties to avoid serialization issues)
-            node.previewScale = 1.0;
+            node.properties.actualImageWidth = 0;
+            node.properties.actualImageHeight = 0;
 
             node.image = new Image();
             node.imageLoaded = false;
             node.dragging = false;
             node.dragMode = null;
             node._isSyncing = false;
+            node.previewScale = 1.0;
 
             node.image.onload = () => {
-                const iw = node.image.width, ih = node.image.height;
-                const ow = node.properties.actualImageWidth, oh = node.properties.actualImageHeight;
-
                 node.imageLoaded = true;
-                node.properties.actualImageWidth = iw;
-                node.properties.actualImageHeight = ih;
-
-                // If resolution changed (new image connected), reset to full image
-                if (ow !== iw || oh !== ih) {
-                    node.applyAspectRatio("Full");
-                }
                 node.setDirtyCanvas(true);
             };
 
-            // 2. Logic Methods
-            node.syncWidgetsFromProperties = function () {
-                if (this._isSyncing || !this.widgets || !this.properties.dragStart) return;
+            node.syncWidgetsFromProperties = function (force = false) {
+                if (this._isSyncing && !force) return;
+                const wasSyncing = this._isSyncing;
                 this._isSyncing = true;
                 try {
-                    let [x1, y1] = this.properties.dragStart, [x2, y2] = this.properties.dragEnd;
-                    let iw = this.properties.actualImageWidth, ih = this.properties.actualImageHeight;
-
-                    // If preview was downsampled, scale coordinates back to real image space
-                    const scale = this.previewScale || 1.0;
-                    if (scale < 1.0) {
-                        x1 = x1 / scale;
-                        y1 = y1 / scale;
-                        x2 = x2 / scale;
-                        y2 = y2 / scale;
-                        iw = iw / scale;
-                        ih = ih / scale;
-                    }
-
                     const find = (n) => this.widgets.find(w => w.name === n);
-
-                    const wl = find("crop_left"), wr = find("crop_right"), wt = find("crop_top"), wb = find("crop_bottom");
-                    const ww = find("crop_current_width"), wh = find("crop_current_height");
-
-                    if (wl) wl.value = Math.round(x1);
-                    if (wr) wr.value = Math.round(iw - x2);
-                    if (wt) wt.value = Math.round(y1);
-                    if (wb) wb.value = Math.round(ih - y2);
-                    if (ww) ww.value = Math.round(Math.abs(x2 - x1));
-                    if (wh) wh.value = Math.round(Math.abs(y2 - y1));
-                } finally {
-                    this._isSyncing = false;
-                }
+                    if (!this.imageLoaded || this.properties.actualImageWidth === 0) {
+                        ["crop_left", "crop_right", "crop_top", "crop_bottom", "crop_current_width", "crop_current_height"].forEach(n => {
+                            const w = find(n); if (w && w.value !== 0) w.value = 0;
+                        });
+                        return;
+                    }
+                    const [x1, y1] = this.properties.dragStart, [x2, y2] = this.properties.dragEnd;
+                    const iw = this.properties.actualImageWidth, ih = this.properties.actualImageHeight;
+                    const setIfChanged = (n, val) => {
+                        const w = find(n);
+                        if (w && Math.round(w.value) !== Math.round(val)) w.value = Math.round(val);
+                    };
+                    setIfChanged("crop_left", x1);
+                    setIfChanged("crop_right", iw - x2);
+                    setIfChanged("crop_top", y1);
+                    setIfChanged("crop_bottom", ih - y2);
+                    setIfChanged("crop_current_width", Math.abs(x2 - x1));
+                    setIfChanged("crop_current_height", Math.abs(y2 - y1));
+                } finally { this._isSyncing = wasSyncing; }
             };
 
             node.syncPropertiesFromWidgets = function () {
-                if (this._isSyncing || !this.widgets) return;
-                const find = (n) => this.widgets.find(w => w.name === n);
-
-                // Widget values are in REAL image coordinates, need to convert to preview coordinates
-                const scale = this.previewScale || 1.0;
-                const previewW = this.image.width;
-                const previewH = this.image.height;
-
-                // Get widget values (in real coordinates)
-                let l = find("crop_left")?.value || 0;
-                let r = find("crop_right")?.value || 0;
-                let t = find("crop_top")?.value || 0;
-                let b = find("crop_bottom")?.value || 0;
-
-                // Convert to preview coordinates
-                if (scale < 1.0) {
-                    l = l * scale;
-                    r = r * scale;
-                    t = t * scale;
-                    b = b * scale;
-                }
-
-                this.properties.dragStart = [l, t];
-                this.properties.dragEnd = [previewW - r, previewH - b];
-                this.setDirtyCanvas(true);
+                if (this._isSyncing) return;
+                this._isSyncing = true;
+                try {
+                    const find = (n) => this.widgets.find(w => w.name === n);
+                    const iw = this.properties.actualImageWidth, ih = this.properties.actualImageHeight;
+                    const l = find("crop_left")?.value || 0, r = find("crop_right")?.value || 0, t = find("crop_top")?.value || 0, b = find("crop_bottom")?.value || 0;
+                    this.properties.dragStart = [l, t]; this.properties.dragEnd = [iw - r, ih - b];
+                    this.setDirtyCanvas(true);
+                } finally { this._isSyncing = false; }
             };
 
             node.applyAspectRatio = function (val) {
-                if (!this.imageLoaded || this._isSyncing || !this.widgets) return;
+                if (this._isSyncing) return;
                 this._isSyncing = true;
                 try {
-                    const iw = this.image.width, ih = this.image.height;
+                    const iw = this.properties.actualImageWidth, ih = this.properties.actualImageHeight;
+                    if (!iw) return;
                     const arWidget = this.widgets.find(w => w.name === "aspect_ratio");
-                    if (val && val !== "Full" && arWidget) arWidget.value = val;
-
-                    if (val === "Full") {
+                    if (val === "NoCrop") {
                         this.properties.dragStart = [0, 0];
-                        this.properties.dragEnd = [iw, ih];
+                        this.properties.dragEnd = [1, 1];
+                    } else if (val === "Full") {
+                        if (arWidget) arWidget.value = `${iw}:${ih}`;
+                        this.properties.dragStart = [0, 0]; this.properties.dragEnd = [iw, ih];
                     } else {
-                        const ratio = parseRatio(val || arWidget?.value || "1:1");
+                        if (val && arWidget && val !== "Full" && val !== "NoCrop") arWidget.value = val;
+                        const ratio = parseRatio(arWidget?.value || "1:1");
                         let nw, nh;
-                        if (iw / ih > ratio) { nh = ih * 0.8; nw = nh * ratio; } else { nw = iw * 0.8; nh = nw / ratio; }
+                        if (iw / ih > ratio) { nh = ih; nw = nh * ratio; } else { nw = iw; nh = nw / ratio; }
                         const nx = (iw - nw) / 2, ny = (ih - nh) / 2;
                         this.properties.dragStart = [Math.round(nx), Math.round(ny)];
                         this.properties.dragEnd = [Math.round(nx + nw), Math.round(ny + nh)];
                     }
-
-                    // Direct property sync with coordinate scaling
-                    const find = (n) => this.widgets.find(w => w.name === n);
-                    let [x1, y1] = this.properties.dragStart, [x2, y2] = this.properties.dragEnd;
-                    let realW = iw, realH = ih;
-
-                    // Scale to real image dimensions if preview was downsampled
-                    const scale = this.previewScale || 1.0;
-                    if (scale < 1.0) {
-                        x1 = x1 / scale;
-                        y1 = y1 / scale;
-                        x2 = x2 / scale;
-                        y2 = y2 / scale;
-                        realW = realW / scale;
-                        realH = realH / scale;
-                    }
-
-                    const wl = find("crop_left"), wr = find("crop_right"), wt = find("crop_top"), wb = find("crop_bottom");
-                    const ww = find("crop_current_width"), wh = find("crop_current_height");
-                    if (wl) wl.value = Math.round(x1); if (wr) wr.value = Math.round(realW - x2);
-                    if (wt) wt.value = Math.round(y1); if (wb) wb.value = Math.round(realH - y2);
-                    if (ww) ww.value = Math.round(Math.abs(x2 - x1)); if (wh) wh.value = Math.round(Math.abs(y2 - y1));
+                    this.syncWidgetsFromProperties(true);
                     this.setDirtyCanvas(true);
-                } finally {
-                    this._isSyncing = false;
-                }
+                } finally { this._isSyncing = false; }
             };
 
             node.onWidgetChanged = function (name, val) {
-                if (this._isSyncing || !this.widgets) return;
+                if (this._isSyncing) return;
                 const find = (n) => this.widgets.find(w => w.name === n);
 
                 if (["crop_left", "crop_right", "crop_top", "crop_bottom"].includes(name)) {
+                    const [ox1, oy1] = [...this.properties.dragStart], [ox2, oy2] = [...this.properties.dragEnd];
+                    const ow = ox2 - ox1, oh = oy2 - oy1;
+
                     this.syncPropertiesFromWidgets();
 
-                    // Apply ratio lock if enabled
-                    if (find("ratio_lock")?.value) {
-                        const [x1, y1] = this.properties.dragStart, [x2, y2] = this.properties.dragEnd;
-                        const cw = Math.abs(x2 - x1), ch = Math.abs(y2 - y1);
-                        const ratio = parseRatio(find("aspect_ratio")?.value || "1:1");
-                        const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+                    const isLocked = find("ratio_lock")?.value;
+                    if (isLocked) {
+                        const [nx1, ny1] = this.properties.dragStart, [nx2, ny2] = this.properties.dragEnd;
+                        const iw = this.properties.actualImageWidth, ih = this.properties.actualImageHeight;
+                        let fx1 = nx1, fy1 = ny1, fx2 = nx2, fy2 = ny2;
 
-                        let nw, nh;
-                        if (name === "crop_left" || name === "crop_right") {
-                            // Width changed, adjust height to maintain ratio
-                            nw = cw;
-                            nh = nw / ratio;
-                        } else {
-                            // Height changed, adjust width to maintain ratio
-                            nh = ch;
-                            nw = nh * ratio;
-                        }
+                        if (name === "crop_left") { fx2 = fx1 + ow; fy1 = oy1; fy2 = oy2; }
+                        else if (name === "crop_right") { fx1 = fx2 - ow; fy1 = oy1; fy2 = oy2; }
+                        else if (name === "crop_top") { fy2 = fy1 + oh; fx1 = ox1; fx2 = ox2; }
+                        else if (name === "crop_bottom") { fy1 = fy2 - oh; fx1 = ox1; fx2 = ox2; }
 
-                        this.properties.dragStart = [cx - nw / 2, cy - nh / 2];
-                        this.properties.dragEnd = [cx + nw / 2, cy + nh / 2];
-                        this.syncWidgetsFromProperties();
+                        if (fx1 < 0) { fx2 -= fx1; fx1 = 0; } if (fy1 < 0) { fy2 -= fy1; fy1 = 0; }
+                        if (fx2 > iw) { fx1 -= (fx2 - iw); fx2 = iw; } if (fy2 > ih) { fy1 -= (fy2 - ih); fy2 = ih; }
+
+                        this.properties.dragStart = [Math.round(fx1), Math.round(fy1)];
+                        this.properties.dragEnd = [Math.round(fx2), Math.round(fy2)];
                     }
+                    this.syncWidgetsFromProperties(true);
                 } else if (name === "crop_current_width" || name === "crop_current_height") {
                     const [x1, y1] = this.properties.dragStart, [x2, y2] = this.properties.dragEnd;
                     const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
-
-                    // Widget values are in REAL coordinates, convert to preview coordinates
-                    const scale = this.previewScale || 1.0;
-                    let nw = name === "crop_current_width" ? val * scale : Math.abs(x2 - x1);
-                    let nh = name === "crop_current_height" ? val * scale : Math.abs(y2 - y1);
+                    let nw = (name === "crop_current_width") ? val : Math.abs(x2 - x1);
+                    let nh = (name === "crop_current_height") ? val : Math.abs(y2 - y1);
 
                     if (find("ratio_lock")?.value) {
                         const r = parseRatio(find("aspect_ratio")?.value || "1:1");
                         if (name === "crop_current_width") nh = nw / r; else nw = nh * r;
                     }
-                    this.properties.dragStart = [cx - nw / 2, cy - nh / 2];
-                    this.properties.dragEnd = [cx + nw / 2, cy + nh / 2];
-                    this.syncWidgetsFromProperties();
-                    this.setDirtyCanvas(true);
+
+                    this.properties.dragStart = [Math.max(0, cx - nw / 2), Math.max(0, cy - nh / 2)];
+                    this.properties.dragEnd = [this.properties.dragStart[0] + nw, this.properties.dragStart[1] + nh];
+                    this.syncWidgetsFromProperties(true);
                 } else if (name === "aspect_ratio") {
-                    const presetWidget = find("Ratio Presets");
-                    if (presetWidget) {
-                        const isKnown = presetWidget.options.values.includes(val);
-                        if (presetWidget.value !== val) presetWidget.value = isKnown ? val : "Custom";
-                    }
+                    const preset = find("Ratio Presets");
+                    if (preset && preset.value !== val) preset.value = preset.options.values.includes(val) ? val : "Custom";
                     this.applyAspectRatio(val);
                 } else if (name === "ratio_lock") {
                     if (val) this.applyAspectRatio();
                 }
             };
 
-            // 3. Mouse Interaction
+            node.onExecuted = function (message) {
+                if (message?.images && message.images.length > 0) {
+                    const img = message.images[0];
+                    const url = api.apiURL(`/view?filename=${encodeURIComponent(img.filename)}&type=${img.type}&subfolder=${encodeURIComponent(img.subfolder || "")}`);
+
+                    if (message.orig_size) {
+                        const [newW, newH] = message.orig_size;
+                        const oldW = node.properties.actualImageWidth, oldH = node.properties.actualImageHeight;
+                        node.properties.actualImageWidth = newW;
+                        node.properties.actualImageHeight = newH;
+                        if (newW !== oldW || newH !== oldH) node.applyAspectRatio("Full");
+                    }
+                    if (message.preview_scale) node.previewScale = Array.isArray(message.preview_scale) ? message.preview_scale[0] : message.preview_scale;
+
+                    this.image.src = url; this.imageLoaded = false;
+                    this.setDirtyCanvas(true);
+                }
+            };
+
+            node.onDrawBackground = function () { if (this.dragging) return; };
+
+            const canvasWidget = {
+                type: "custom_canvas", name: "crop_preview",
+                draw(ctx, node, width, y) {
+                    const margin = 10, drawW = width - margin * 2, drawH = Math.max(150, node.size[1] - y - margin * 2);
+                    const startY = y + margin;
+                    ctx.fillStyle = "#161616"; ctx.fillRect(margin, startY, drawW, drawH);
+                    if (!node.imageLoaded) { ctx.fillStyle = "#666"; ctx.textAlign = "center"; ctx.fillText("No Image", margin + drawW / 2, startY + drawH / 2); return; }
+                    const imgAR = node.image.width / node.image.height, areaAR = drawW / drawH;
+                    let pw, ph, px, py;
+                    if (imgAR > areaAR) { pw = drawW; ph = drawW / imgAR; px = margin; py = startY + (drawH - ph) / 2; }
+                    else { ph = drawH; pw = drawH * imgAR; px = margin + (drawW - pw) / 2; py = startY; }
+                    ctx.drawImage(node.image, px, py, pw, ph);
+                    const drawScale = pw / node.properties.actualImageWidth;
+                    const [x1, y1] = node.properties.dragStart, [x2, y2] = node.properties.dragEnd;
+                    const rx = px + x1 * drawScale, ry = py + y1 * drawScale, rw = (x2 - x1) * drawScale, rh = (y2 - y1) * drawScale;
+                    ctx.save(); ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.beginPath(); ctx.rect(px, py, pw, ph); ctx.rect(rx, ry, rw, rh); ctx.fill("evenodd"); ctx.restore();
+                    ctx.strokeStyle = "#0f0"; ctx.lineWidth = 2; ctx.strokeRect(rx, ry, rw, rh);
+                    const realW = node.properties.actualImageWidth, realH = node.properties.actualImageHeight;
+                    const realCropW = Math.round(x2 - x1), realCropH = Math.round(y2 - y1);
+                    const perW = Math.round((realCropW / realW) * 100), perH = Math.round((realCropH / realH) * 100);
+                    ctx.save(); ctx.font = "bold 14px Arial"; ctx.textAlign = "center"; ctx.shadowColor = "black"; ctx.shadowBlur = 4; ctx.fillStyle = "#aaff00";
+                    ctx.fillText(`${perW} × ${perH} %`, px + pw / 2, py + ph / 2 + 5);
+                    ctx.fillText(`${realCropW} × ${realCropH} px`, px + pw / 2, py + ph / 2 + 22);
+                    ctx.restore();
+                    node.previewArea = { x: px, y: py, width: pw, height: ph, scale: drawScale };
+                },
+                computeSize(width) { return [width, -1]; }
+            };
+
+            node.addWidget("combo", "Ratio Presets", "Custom", (v) => {
+                const ar = node.widgets.find(w => w.name === "aspect_ratio");
+                if (ar && v !== "Custom") { ar.value = v; node.applyAspectRatio(v); }
+            }, { values: ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2", "21:9", "Custom"] });
+
+            // Ratio Presets positioning
+            const arIdx = node.widgets.findIndex(w => w.name === "aspect_ratio");
+            if (arIdx !== -1) {
+                const presetWidget = node.widgets.pop();
+                node.widgets.splice(arIdx + 1, 0, presetWidget);
+            }
+
+            node.addWidget("button", "Full Image Crop", null, () => node.applyAspectRatio("Full"));
+            node.addWidget("button", "No Crop", null, () => node.applyAspectRatio("NoCrop"));
+            node.addWidget("button", "Center Selection", null, () => {
+                const iw = node.properties.actualImageWidth, ih = node.properties.actualImageHeight;
+                if (!iw) return;
+                const [x1, y1] = node.properties.dragStart, [x2, y2] = node.properties.dragEnd;
+                const cw = (x2 - x1), ch = (y2 - y1);
+                const nx = Math.round((iw - cw) / 2), ny = Math.round((ih - ch) / 2);
+                node.properties.dragStart = [nx, ny];
+                node.properties.dragEnd = [nx + cw, ny + ch];
+                node.syncWidgetsFromProperties(true); node.setDirtyCanvas(true);
+            });
+            node.addWidget("button", "Apply Ratio & Center", null, () => node.applyAspectRatio());
+            node.addCustomWidget(canvasWidget);
+
             node.convertToImageSpace = function (pos) {
                 if (!this.previewArea) return null;
                 const p = this.previewArea;
+                if (pos[0] < p.x || pos[0] > p.x + p.width || pos[1] < p.y || pos[1] > p.y + p.height) return null;
                 return [(pos[0] - p.x) / p.scale, (pos[1] - p.y) / p.scale];
             };
 
@@ -295,8 +286,7 @@ app.registerExtension({
                 const [ix, iy] = imgPos, threshold = 15 / (this.previewArea?.scale || 1);
                 const nearL = Math.abs(ix - x1) < threshold, nearR = Math.abs(ix - x2) < threshold;
                 const nearT = Math.abs(iy - y1) < threshold, nearB = Math.abs(iy - y2) < threshold;
-                const inX = ix > Math.min(x1, x2) && ix < Math.max(x1, x2);
-                const inY = iy > Math.min(y1, y2) && iy < Math.max(y1, y2);
+                const inX = ix > Math.min(x1, x2) && ix < Math.max(x1, x2), inY = iy > Math.min(y1, y2) && iy < Math.max(y1, y2);
                 if (nearL && nearT) return "tl"; if (nearR && nearT) return "tr";
                 if (nearL && nearB) return "bl"; if (nearR && nearB) return "br";
                 if (nearT && inX) return "t"; if (nearB && inX) return "b";
@@ -308,12 +298,13 @@ app.registerExtension({
             node.onMouseDown = function (e, pos) {
                 if (!this.imageLoaded) return false;
                 const imgPos = this.convertToImageSpace(pos);
-                if (!imgPos) return false;
-                const hit = this.getHitArea(imgPos);
-                if (hit) {
-                    this.dragging = true; this.dragMode = hit; this.dragStartImg = imgPos;
-                    this.origStart = [...this.properties.dragStart]; this.origEnd = [...this.properties.dragEnd];
-                    return true;
+                if (imgPos) {
+                    const hit = this.getHitArea(imgPos);
+                    if (hit) {
+                        this.dragging = true; this.dragMode = hit; this.dragStartImg = imgPos;
+                        this.origStart = [...this.properties.dragStart]; this.origEnd = [...this.properties.dragEnd];
+                        return true;
+                    }
                 }
                 return false;
             };
@@ -328,149 +319,55 @@ app.registerExtension({
                 }
                 if (e.buttons === 0) { this.onMouseUp(e); return false; }
                 if (!imgPos) return;
-
                 const dx = imgPos[0] - this.dragStartImg[0], dy = imgPos[1] - this.dragStartImg[1];
                 let [nx1, ny1] = [...this.origStart], [nx2, ny2] = [...this.origEnd];
                 const iw = this.properties.actualImageWidth, ih = this.properties.actualImageHeight;
-                const find = (n) => this.widgets?.find(w => w.name === n);
-                const isLocked = find("ratio_lock")?.value;
-                const ratio = isLocked ? parseRatio(find("aspect_ratio")?.value || "1:1") : 1;
-
+                const lock = this.widgets.find(wi => wi.name === "ratio_lock")?.value;
+                const rat = lock ? parseRatio(this.widgets.find(wi => wi.name === "aspect_ratio")?.value || "1:1") : 1;
                 if (this.dragMode === "move") {
                     const w = nx2 - nx1, h = ny2 - ny1;
-                    nx1 = Math.max(0, Math.min(iw - w, nx1 + dx));
-                    ny1 = Math.max(0, Math.min(ih - h, ny1 + dy));
+                    nx1 = Math.max(0, Math.min(iw - w, nx1 + dx)); ny1 = Math.max(0, Math.min(ih - h, ny1 + dy));
                     nx2 = nx1 + w; ny2 = ny1 + h;
                 } else {
                     if (this.dragMode.includes("l")) nx1 += dx; if (this.dragMode.includes("r")) nx2 += dx;
                     if (this.dragMode.includes("t")) ny1 += dy; if (this.dragMode.includes("b")) ny2 += dy;
-                    if (isLocked) {
+                    if (lock) {
                         let nw = nx2 - nx1, nh = ny2 - ny1;
-                        if (this.dragMode === "l" || this.dragMode === "r") { nh = nw / ratio; ny2 = ny1 + nh; }
-                        else if (this.dragMode === "t" || this.dragMode === "b") { nw = nh * ratio; nx2 = nx1 + nw; }
-                        else {
-                            if (Math.abs(dx) * ratio > Math.abs(dy)) { nh = nw / ratio; if (this.dragMode.includes("t")) ny1 = ny2 - nh; else ny2 = ny1 + nh; }
-                            else { nw = nh * ratio; if (this.dragMode.includes("l")) nx1 = nx2 - nw; else nx2 = nx1 + nw; }
+                        if (this.dragMode === "l" || this.dragMode === "r") {
+                            const ow = this.origEnd[0] - this.origStart[0];
+                            if (this.dragMode === "l") { nx1 = Math.max(0, Math.min(iw - ow, nx1)); nx2 = nx1 + ow; }
+                            else { nx2 = Math.max(ow, Math.min(iw, nx2)); nx1 = nx2 - ow; }
+                            ny1 = this.origStart[1]; ny2 = this.origEnd[1];
+                        } else if (this.dragMode === "t" || this.dragMode === "b") {
+                            const oh = this.origEnd[1] - this.origStart[1];
+                            if (this.dragMode === "t") { ny1 = Math.max(0, Math.min(ih - oh, ny1)); ny2 = ny1 + oh; }
+                            else { ny2 = Math.max(oh, Math.min(ih, ny2)); ny1 = ny2 - oh; }
+                            nx1 = this.origStart[0]; nx2 = this.origEnd[0];
+                        } else {
+                            if (Math.abs(dx) * rat > Math.abs(dy)) { nh = nw / rat; if (this.dragMode.includes("t")) ny1 = ny2 - nh; else ny2 = ny1 + nh; }
+                            else { nw = nh * rat; if (this.dragMode.includes("l")) nx1 = nx2 - nw; else nx2 = nx1 + nw; }
+                            if (nx1 < 0) { const d = -nx1; nx1 = 0; if (this.dragMode.includes("t")) ny1 += d / rat; else ny2 -= d / rat; }
+                            if (ny1 < 0) { const d = -ny1; ny1 = 0; if (this.dragMode.includes("l")) nx1 += d * rat; else nx2 -= d * rat; }
+                            if (nx2 > iw) { const d = nx2 - iw; nx2 = iw; if (this.dragMode.includes("t")) ny1 += d / rat; else ny2 -= d / rat; }
+                            if (ny2 > ih) { const d = ny2 - ih; ny2 = ih; if (this.dragMode.includes("l")) nx1 += d * rat; else nx2 -= d * rat; }
                         }
-                        if (nx1 < 0) { const d = -nx1; nx1 = 0; if (this.dragMode.includes("t")) ny1 += d / ratio; else ny2 -= d / ratio; }
-                        if (ny1 < 0) { const d = -ny1; ny1 = 0; if (this.dragMode.includes("l")) nx1 += d * ratio; else nx2 -= d * ratio; }
-                        if (nx2 > iw) { const d = nx2 - iw; nx2 = iw; if (this.dragMode.includes("t")) ny1 += d / ratio; else ny2 -= d / ratio; }
-                        if (ny2 > ih) { const d = ny2 - ih; ny2 = ih; if (this.dragMode.includes("l")) nx1 += d * ratio; else nx2 -= d * ratio; }
                     }
                 }
-                nx1 = Math.max(0, Math.min(iw - 1, nx1)); ny1 = Math.max(0, Math.min(ih - 1, ny1));
-                nx2 = Math.max(nx1 + 1, Math.min(iw, nx2)); ny2 = Math.max(ny1 + 1, Math.min(ih, ny2));
-                this.properties.dragStart = [Math.round(nx1), Math.round(ny1)];
-                this.properties.dragEnd = [Math.round(nx2), Math.round(ny2)];
-                this.syncWidgetsFromProperties();
-                this.setDirtyCanvas(true);
+                this.properties.dragStart = [Math.round(Math.max(0, Math.min(iw - 1, nx1))), Math.round(Math.max(0, Math.min(ih - 1, ny1)))];
+                this.properties.dragEnd = [Math.round(Math.max(this.properties.dragStart[0] + 1, Math.min(iw, nx2))), Math.round(Math.max(this.properties.dragStart[1] + 1, Math.min(ih, ny2)))];
+                this.syncWidgetsFromProperties(true); this.setDirtyCanvas(true);
                 return true;
             };
 
             node.onMouseUp = function (e) {
-                if (this.dragging) {
-                    this.dragging = false; this.dragMode = null;
-                    app.canvas.canvas.style.cursor = "default";
-                    this.setDirtyCanvas(true);
-                    return true;
-                }
+                if (this.dragging) { this.dragging = false; this.dragMode = null; app.canvas.canvas.style.cursor = "default"; this.setDirtyCanvas(true); return true; }
                 return false;
             };
-
-            // Use ComfyUI's native preview mechanism (like SaveImage/PreviewImage)
-            // Handle execution result
-            node.onExecuted = function (message) {
-                if (message?.images && message.images.length > 0) {
-                    const img = message.images[0];
-                    const url = api.apiURL(`/view?filename=${encodeURIComponent(img.filename)}&type=${img.type}&subfolder=${encodeURIComponent(img.subfolder || "")}`);
-                    this.backendUrl = url;
-
-                    // Store preview scale for coordinate conversion (as instance variable)
-                    if (message.preview_scale !== undefined) {
-                        this.previewScale = Array.isArray(message.preview_scale) ? message.preview_scale[0] : message.preview_scale;
-                    }
-
-                    if (this.image.src !== url) {
-                        this.image.src = url;
-                        this.imageLoaded = false;
-                    }
-                    this.setDirtyCanvas(true);
-                }
-            };
-
-            node.onDrawBackground = function () {
-                if (this.dragging) return;
-                // No more auto-backtracking! 
-                // Canvas only updates via onExecuted or Manual "Reload" button.
-            };
-
-            // 4. UI Setup
-            const canvasWidget = {
-                type: "custom_canvas", name: "crop_preview",
-                draw(ctx, node, width, y) {
-                    const margin = 10, drawW = width - margin * 2, drawH = Math.max(150, node.size[1] - y - margin * 2);
-                    const startY = y + margin;
-                    ctx.fillStyle = "#161616"; ctx.fillRect(margin, startY, drawW, drawH);
-                    if (!node.imageLoaded) { ctx.fillStyle = "#666"; ctx.textAlign = "center"; ctx.fillText("No Image", margin + drawW / 2, startY + drawH / 2); return; }
-                    const imgAR = node.image.width / node.image.height, areaAR = drawW / drawH;
-                    let pw, ph, px, py;
-                    if (imgAR > areaAR) { pw = drawW; ph = drawW / imgAR; px = margin; py = startY + (drawH - ph) / 2; }
-                    else { ph = drawH; pw = drawH * imgAR; px = margin + (drawW - pw) / 2; py = startY; }
-                    const scale = pw / node.image.width;
-                    node.previewArea = { x: px, y: py, scale, width: pw, height: ph };
-                    ctx.drawImage(node.image, px, py, pw, ph);
-                    const [x1, y1] = node.properties.dragStart, [x2, y2] = node.properties.dragEnd;
-                    const rx = px + x1 * scale, ry = py + y1 * scale, rw = (x2 - x1) * scale, rh = (y2 - y1) * scale;
-                    ctx.save(); ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.beginPath(); ctx.rect(px, py, pw, ph); ctx.rect(rx, ry, rw, rh); ctx.fill("evenodd"); ctx.restore();
-                    ctx.strokeStyle = "#0f0"; ctx.lineWidth = 2; ctx.strokeRect(rx, ry, rw, rh);
-
-                    // Center crosshair
-                    ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.beginPath();
-                    ctx.moveTo(rx + rw / 2 - 10, ry + rh / 2); ctx.lineTo(rx + rw / 2 + 10, ry + rh / 2);
-                    ctx.moveTo(rx + rw / 2, ry + rh / 2 - 10); ctx.lineTo(rx + rw / 2, ry + rh / 2 + 10); ctx.stroke();
-
-                    // Image Info Overlay (show REAL image dimensions, not preview)
-                    const coordScale = node.previewScale || 1.0;
-                    const realW = Math.round(node.image.width / coordScale);
-                    const realH = Math.round(node.image.height / coordScale);
-                    const realCropW = Math.round((x2 - x1) / coordScale);
-                    const realCropH = Math.round((y2 - y1) / coordScale);
-                    const perW = Math.round((realCropW / realW) * 100);
-                    const perH = Math.round((realCropH / realH) * 100);
-
-                    ctx.save();
-                    ctx.font = "bold 14px Arial"; ctx.textAlign = "center";
-                    ctx.shadowColor = "black"; ctx.shadowBlur = 4;
-                    ctx.fillStyle = "#aaff00";
-                    ctx.fillText(`${perW} × ${perH} %`, px + pw / 2, py + ph / 2 + 5);
-                    ctx.fillText(`${realCropW} × ${realCropH} px`, px + pw / 2, py + ph / 2 + 22);
-                    ctx.restore();
-                },
-                computeSize(width) { return [width, -1]; }
-            };
-
-            node.addWidget("combo", "Ratio Presets", "Custom", (v) => {
-                if (v && v !== "Custom" && !node._isSyncing) {
-                    const arWidget = node.widgets?.find(w => w.name === "aspect_ratio");
-                    if (arWidget) { arWidget.value = v; node.applyAspectRatio(v); }
-                }
-            }, { values: ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2", "21:9", "Custom"] });
-            const apIdx = node.widgets.findIndex(w => w.name === "aspect_ratio");
-            if (apIdx !== -1) { const pWidget = node.widgets.pop(); node.widgets.splice(apIdx + 1, 0, pWidget); }
-
-            node.addWidget("button", "Reset: Full Image", null, () => node.applyAspectRatio("Full"));
-            node.addWidget("button", "Center Selection", null, () => {
-                if (!node.imageLoaded) return;
-                const iw = node.image.width, ih = node.image.height;
-                const [x1, y1] = node.properties.dragStart, [x2, y2] = node.properties.dragEnd;
-                const cw = x2 - x1, ch = y2 - y1;
-                node.properties.dragStart = [(iw - cw) / 2, (ih - ch) / 2];
-                node.properties.dragEnd = [node.properties.dragStart[0] + cw, node.properties.dragStart[1] + ch];
-                node.syncWidgetsFromProperties(); node.setDirtyCanvas(true);
-            });
-            node.addWidget("button", "Apply Ratio & Center", null, () => node.applyAspectRatio());
-            node.addCustomWidget(canvasWidget);
-            node.size = [420, 910];
         };
+    },
+    nodeCreated(node) {
+        if (node.comfyClass !== "FreeDragCrop") return;
+        const lock = node.widgets.find(w => w.name === "ratio_lock");
+        if (lock) lock.value = true;
     }
 });

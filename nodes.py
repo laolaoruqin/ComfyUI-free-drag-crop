@@ -19,10 +19,10 @@ class FreeDragCrop:
                 "crop_bottom": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 1}),
             },
             "optional": {
-                "crop_current_width": ("INT", {"default": 512, "min": 1, "max": 16384, "step": 1}),
-                "crop_current_height": ("INT", {"default": 512, "min": 1, "max": 16384, "step": 1}),
+                "crop_current_width": ("INT", {"default": 512, "min": 0, "max": 16384, "step": 1}),
+                "crop_current_height": ("INT", {"default": 512, "min": 0, "max": 16384, "step": 1}),
                 "aspect_ratio": ("STRING", {"default": "16:9"}),
-                "ratio_lock": ("BOOLEAN", {"default": False}),
+                "ratio_lock": ("BOOLEAN", {"default": True}),
                 "mask": ("MASK",),
             }
         }
@@ -71,12 +71,12 @@ class FreeDragCrop:
         preview_img = Image.fromarray(np.clip(preview_array, 0, 255).astype(np.uint8))
         
         # Memory optimization: downsample preview but track the scale
-        MAX_PREVIEW_SIZE = 2048
+        MAX_PREVIEW_SIZE = 1024
         preview_scale = 1.0
         if preview_img.width > MAX_PREVIEW_SIZE or preview_img.height > MAX_PREVIEW_SIZE:
             preview_scale = MAX_PREVIEW_SIZE / max(preview_img.width, preview_img.height)
             new_size = (int(preview_img.width * preview_scale), int(preview_img.height * preview_scale))
-            preview_img = preview_img.resize(new_size, Image.Resampling.LANCZOS)
+            preview_img = preview_img.resize(new_size, Image.Resampling.BILINEAR)
         
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path("free_drag_crop_preview", folder_paths.get_temp_directory())
         
@@ -93,7 +93,8 @@ class FreeDragCrop:
         return {
             "ui": {
                 "images": preview_results,
-                "preview_scale": [preview_scale]  # Wrap in list for ComfyUI compatibility
+                "preview_scale": [preview_scale],
+                "orig_size": [int(w), int(h)]
             },
             "result": (cropped_image, cropped_mask, json.dumps(crop_json))
         }
