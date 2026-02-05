@@ -52,6 +52,22 @@ const parseRatio = (r) => {
     return p.length === 2 ? (parseFloat(p[0]) / parseFloat(p[1]) || 1) : (parseFloat(s) || 1);
 };
 
+const TOOLTIPS = {
+    "crop_left": { en: "Pixels to crop from the left edge", zh: "从左边缘剪裁的像素长度" },
+    "crop_right": { en: "Pixels to crop from the right edge", zh: "从右边缘剪裁的像素长度" },
+    "crop_top": { en: "Pixels to crop from the top edge", zh: "从上边缘剪裁的像素长度" },
+    "crop_bottom": { en: "Pixels to crop from the bottom edge", zh: "从下边缘剪裁的像素长度" },
+    "crop_current_width": { en: "Current width of the selection area", zh: "当前选区的宽度 (像素)" },
+    "crop_current_height": { en: "Current height of the selection area", zh: "当前选区的高度 (像素)" },
+    "aspect_ratio": { en: "Target aspect ratio (W:H) for the crop", zh: "剪裁的目标宽高比 (宽:高)" },
+    "Ratio Presets": { en: "Quick presets for common aspect ratios", zh: "快速切换常用宽高比预设" },
+    "ratio_lock": { en: "Maintain aspect ratio while resizing", zh: "开启后调整大小时将锁定比例" },
+    "Full Image Crop": { en: "Expand crop to fit the whole image", zh: "全图自适应：在当前比例下扩至最大" },
+    "No Crop": { en: "Reset selection to origin (1x1 pixel)", zh: "重置选区：恢复至初始 1x1 状态" },
+    "Center Selection": { en: "Move current selection to image center", zh: "居中选区：保持大小并将位置移至中心" },
+    "Apply Ratio & Center": { en: "Apply ratio and center the selection", zh: "应用比例并居中：强制重置选区为当前比例并居中" }
+};
+
 app.registerExtension({
     name: "FreeDragCrop.Antigravity",
     async beforeRegisterNodeDef(nodeType, nodeData) {
@@ -74,6 +90,7 @@ app.registerExtension({
             node.dragMode = null;
             node._isSyncing = false;
             node.previewScale = 1.0;
+            node.hoveredWidget = null;
 
             node.image.onload = () => {
                 node.imageLoaded = true;
@@ -243,6 +260,48 @@ app.registerExtension({
                     ctx.fillText(`${realCropW} × ${realCropH} px`, px + pw / 2, py + ph / 2 + 22);
                     ctx.restore();
                     node.previewArea = { x: px, y: py, width: pw, height: ph, scale: drawScale };
+
+                    if (node.hoveredWidget && TOOLTIPS[node.hoveredWidget.name]) {
+                        const tip = TOOLTIPS[node.hoveredWidget.name];
+                        const textEn = tip.en;
+                        const textZh = tip.zh;
+
+                        ctx.save();
+                        const fontHeight = 14;
+                        ctx.font = `${fontHeight}px Arial`;
+                        const mEn = ctx.measureText(textEn);
+                        const mZh = ctx.measureText(textZh);
+                        const boxW = Math.max(mEn.width, mZh.width) + 20;
+                        const boxH = fontHeight * 2 + 25;
+                        const bx = px + (pw - boxW) / 2;
+                        const by = py + 10;
+
+                        ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+                        ctx.strokeStyle = "#0f0";
+                        ctx.lineWidth = 1;
+                        // Rounded rect
+                        const r = 5;
+                        ctx.beginPath();
+                        ctx.moveTo(bx + r, by);
+                        ctx.lineTo(bx + boxW - r, by);
+                        ctx.quadraticCurveTo(bx + boxW, by, bx + boxW, by + r);
+                        ctx.lineTo(bx + boxW, by + boxH - r);
+                        ctx.quadraticCurveTo(bx + boxW, by + boxH, bx + boxW - r, by + boxH);
+                        ctx.lineTo(bx + r, by + boxH);
+                        ctx.quadraticCurveTo(bx, by + boxH, bx, by + boxH - r);
+                        ctx.lineTo(bx, by + r);
+                        ctx.quadraticCurveTo(bx, by, bx + r, by);
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.stroke();
+
+                        ctx.fillStyle = "#fff";
+                        ctx.textAlign = "center";
+                        ctx.fillText(textEn, bx + boxW / 2, by + 20);
+                        ctx.fillStyle = "#0f0";
+                        ctx.fillText(textZh, bx + boxW / 2, by + 40);
+                        ctx.restore();
+                    }
                 },
                 computeSize(width) { return [width, -1]; }
             };
@@ -315,6 +374,20 @@ app.registerExtension({
                     const hit = imgPos ? this.getHitArea(imgPos) : null;
                     const cursors = { move: "move", tl: "nwse-resize", br: "nwse-resize", tr: "nesw-resize", bl: "nesw-resize", t: "ns-resize", b: "ns-resize", l: "ew-resize", r: "ew-resize" };
                     app.canvas.canvas.style.cursor = hit ? cursors[hit] : "default";
+
+                    // Track hovered widget for tooltip
+                    const oldHover = this.hoveredWidget;
+                    this.hoveredWidget = null;
+                    if (this.widgets) {
+                        for (const w of this.widgets) {
+                            if (w.last_y !== undefined && pos[1] >= w.last_y && pos[1] <= w.last_y + (w.computeSize?.()[1] || 20)) {
+                                this.hoveredWidget = w;
+                                break;
+                            }
+                        }
+                    }
+                    if (oldHover !== this.hoveredWidget) this.setDirtyCanvas(true);
+
                     return !!hit;
                 }
                 if (e.buttons === 0) { this.onMouseUp(e); return false; }
