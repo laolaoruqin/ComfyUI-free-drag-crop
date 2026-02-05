@@ -1,6 +1,6 @@
 # ComfyUI-free-drag-crop
 
-[English](#english-version) | [中文](#中文说明) | [Technical Highlights](#technical-highlights)
+[English](#english-version) | [中文](#中文说明) | [Technical Highlights / 技术亮点](#technical-highlights--技术亮点)
 
 ---
 
@@ -64,7 +64,9 @@ A professional, high-precision interactive cropping node for ComfyUI. Drag, resi
 
 ---
 
-# Technical Highlights
+# Technical Highlights / 技术亮点
 
 > [!TIP]
-> This node uses a high-performance rendering loop and a specialized "Resolution Stability Guard". Unlike other crop nodes that drift on large images, **Free Drag Crop** maintains sub-pixel accuracy even for 8K+ resolutions.
+> [EN] This node uses a high-performance rendering loop and a specialized "Resolution Stability Guard". Unlike other crop nodes that drift on large images, **Free Drag Crop** maintains sub-pixel accuracy even for 8K+ resolutions.
+>
+> [CN] 该节点采用了高性能渲染循环和专门的“分辨率稳定性卫士”。与处理大图时容易产生偏移的其他裁剪节点不同，**Free Drag Crop** 即使在 8K+ 分辨率下也能保持亚像素级的精确度。
