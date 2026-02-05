@@ -28,7 +28,7 @@ Documentation = "https://github.com/laolaoruqin/ComfyUI-free-drag-crop/wiki"
 "Bug Tracker" = "https://github.com/laolaoruqin/ComfyUI-free-drag-crop/issues"
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "laolaoruqin"
 DisplayName = "ComfyUI-free-drag-crop"
 Icon = ""
 includes = [] 
