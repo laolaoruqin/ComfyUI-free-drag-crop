@@ -13,13 +13,14 @@ A professional, high-precision interactive cropping node for ComfyUI. Drag, resi
 ## Key Features 🚀
 
 - **Interactive Canvas**: Drag to select, resize from 8-point handles, or move the entire selection area.
-- **Real-Pixel Precision**: All calculations are based on original image dimensions to prevent rounding errors or resolution drifts.
-- **Aspect Ratio Locking**: Lock your selection to a specific ratio (e.g., 16:9, 1:1) and adjust boundaries while maintaining the frame.
+- **Real-Pixel Precision**: All calculations are based on original image dimensions to prevent resolution drifts.
+- **Aspect Ratio Locking**: Lock your selection to a specific ratio and adjust boundaries while maintaining the frame.
 - **Smart Presets**: Quick access to common ratios (4:3, 9:16, 9:20, 21:9, etc.).
-- **Smart Resets**:
-  - **Full Image Crop**: Expand to the maximum possible coverage for the current ratio.
-  - **No Crop**: Reset to origin with 1x1 pixel selection (ideal for bypassing crop logic).
-- **Responsive Sync**: Real-time synchronization between the visual canvas and numeric widgets.
+- **Master Resets**: 
+  - **Full Image Crop**: Expand to cover the entire image and automatically unlock the ratio for manual adjustment.
+  - **No Crop**: Reset to origin (1x1) and clear all constraints.
+- **Bilingual Help Sidebar**: Hover over the `?` icon to see a high-fidelity, adaptive instruction panel (English/Chinese) perfectly aligned with widgets.
+- **Real-time Ratio Feedback**: The aspect ratio widget updates instantly during manual dragging to show actual `W:H` status.
 
 ## Installation 🛠️
 
@@ -47,10 +48,11 @@ A professional, high-precision interactive cropping node for ComfyUI. Drag, resi
 - **真实像素精度**：所有计算均基于原图尺寸，彻底杜绝舍入误差造成的选区偏移。
 - **比例锁定**：支持一键开启比例锁定（如 16:9），并在缩放边界时自动维持该比例。
 - **比例预设**：内置常用比例（1:1, 4:3, 9:16, 9:20, 21:9 等）快速切换。
-- **智能重置**：
-  - **Full Image Crop (全图自适应)**：在当前比例下自动扩展至最大选区。
-  - **No Crop (清空裁剪)**：一键归零，恢复至初始状态。
-- **极速响应**：画板手感顺滑，数值输入与画面实时同步。
+- **大师级重置**：
+  - **Full Image Crop (全图自适应)**：一键铺满全图，并自动解除锁定以便自由调整。
+  - **No Crop (清空裁剪)**：一键归零并重置所有限制。
+- **双语交互式助手**：鼠标指向蓝色 `?` 图标可展开高保真、自适应宽高的中英双语详细说明面板。
+- **实时比例反馈**：手动拖拽选区时，比例文本框会实时显示真实的像素宽度比（W:H）。
 
 ## 安装说明 📦
 
@@ -69,6 +71,6 @@ A professional, high-precision interactive cropping node for ComfyUI. Drag, resi
 # Technical Highlights / 技术亮点
 
 > [!TIP]
-> **[EN]** This node uses a high-performance rendering loop and a specialized "Resolution Stability Guard". Unlike other crop nodes that drift on large images, **Free Drag Crop** maintains sub-pixel accuracy even for 8K+ resolutions.
+> **[EN]** This node uses a high-performance rendering loop and a specialized "Resolution Stability Guard". Unlike other crop nodes that drift on large images, **Free Drag Crop** maintains sub-pixel accuracy even for 8K+ resolutions. Now with a fully adaptive, precision-aligned help UI for better accessibility.
 >
-> **[CN]** 该节点采用了高性能渲染循环和专门的“分辨率稳定性卫士”。与处理大图时容易产生偏移的其他裁剪节点不同，**Free Drag Crop** 即使在 8K+ 分辨率下也能保持亚像素级的精确度。
+> **[CN]** 该节点采用了高性能渲染循环和专门的“分辨率稳定性卫士”。与处理大图时容易产生偏移的其他裁剪节点不同，**Free Drag Crop** 即使在 8K+ 分辨率下也能保持亚像素级的精确度。现已配备全自适应、精准对齐的双语帮助面板，操作门槛更低。
