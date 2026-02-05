@@ -238,10 +238,56 @@ app.registerExtension({
             const canvasWidget = {
                 type: "custom_canvas", name: "crop_preview",
                 draw(ctx, node, width, y) {
-                    const margin = 10, drawW = width - margin * 2, drawH = Math.max(150, node.size[1] - y - margin * 2);
+                    const margin = 10, drawW = width - margin * 2;
+                    const drawH = node.imageLoaded ? Math.max(200, Math.min(400, node.size[1] - y - margin * 2)) : 200;
                     const startY = y + margin;
                     ctx.fillStyle = "#161616"; ctx.fillRect(margin, startY, drawW, drawH);
-                    if (!node.imageLoaded) { ctx.fillStyle = "#666"; ctx.textAlign = "center"; ctx.fillText("No Image", margin + drawW / 2, startY + drawH / 2); return; }
+
+                    // Draw tooltip even when no image
+                    if (node.hoveredWidget && TOOLTIPS[node.hoveredWidget.name]) {
+                        const tip = TOOLTIPS[node.hoveredWidget.name];
+                        ctx.save();
+                        const fontHeight = 14;
+                        ctx.font = `${fontHeight}px Arial`;
+                        const mEn = ctx.measureText(tip.en);
+                        const mZh = ctx.measureText(tip.zh);
+                        const boxW = Math.max(mEn.width, mZh.width) + 20;
+                        const boxH = fontHeight * 2 + 25;
+                        const bx = margin + (drawW - boxW) / 2;
+                        const by = startY + 10;
+
+                        ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+                        ctx.strokeStyle = "#0f0";
+                        ctx.lineWidth = 1;
+                        const r = 5;
+                        ctx.beginPath();
+                        ctx.moveTo(bx + r, by);
+                        ctx.lineTo(bx + boxW - r, by);
+                        ctx.quadraticCurveTo(bx + boxW, by, bx + boxW, by + r);
+                        ctx.lineTo(bx + boxW, by + boxH - r);
+                        ctx.quadraticCurveTo(bx + boxW, by + boxH, bx + boxW - r, by + boxH);
+                        ctx.lineTo(bx + r, by + boxH);
+                        ctx.quadraticCurveTo(bx, by + boxH, bx, by + boxH - r);
+                        ctx.lineTo(bx, by + r);
+                        ctx.quadraticCurveTo(bx, by, bx + r, by);
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.stroke();
+
+                        ctx.fillStyle = "#fff";
+                        ctx.textAlign = "center";
+                        ctx.fillText(tip.en, bx + boxW / 2, by + 20);
+                        ctx.fillStyle = "#0f0";
+                        ctx.fillText(tip.zh, bx + boxW / 2, by + 40);
+                        ctx.restore();
+                    }
+
+                    if (!node.imageLoaded) {
+                        ctx.fillStyle = "#666";
+                        ctx.textAlign = "center";
+                        ctx.fillText("No Image", margin + drawW / 2, startY + drawH / 2);
+                        return;
+                    }
                     const imgAR = node.image.width / node.image.height, areaAR = drawW / drawH;
                     let pw, ph, px, py;
                     if (imgAR > areaAR) { pw = drawW; ph = drawW / imgAR; px = margin; py = startY + (drawH - ph) / 2; }
@@ -260,48 +306,6 @@ app.registerExtension({
                     ctx.fillText(`${realCropW} × ${realCropH} px`, px + pw / 2, py + ph / 2 + 22);
                     ctx.restore();
                     node.previewArea = { x: px, y: py, width: pw, height: ph, scale: drawScale };
-
-                    if (node.hoveredWidget && TOOLTIPS[node.hoveredWidget.name]) {
-                        const tip = TOOLTIPS[node.hoveredWidget.name];
-                        const textEn = tip.en;
-                        const textZh = tip.zh;
-
-                        ctx.save();
-                        const fontHeight = 14;
-                        ctx.font = `${fontHeight}px Arial`;
-                        const mEn = ctx.measureText(textEn);
-                        const mZh = ctx.measureText(textZh);
-                        const boxW = Math.max(mEn.width, mZh.width) + 20;
-                        const boxH = fontHeight * 2 + 25;
-                        const bx = px + (pw - boxW) / 2;
-                        const by = py + 10;
-
-                        ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
-                        ctx.strokeStyle = "#0f0";
-                        ctx.lineWidth = 1;
-                        // Rounded rect
-                        const r = 5;
-                        ctx.beginPath();
-                        ctx.moveTo(bx + r, by);
-                        ctx.lineTo(bx + boxW - r, by);
-                        ctx.quadraticCurveTo(bx + boxW, by, bx + boxW, by + r);
-                        ctx.lineTo(bx + boxW, by + boxH - r);
-                        ctx.quadraticCurveTo(bx + boxW, by + boxH, bx + boxW - r, by + boxH);
-                        ctx.lineTo(bx + r, by + boxH);
-                        ctx.quadraticCurveTo(bx, by + boxH, bx, by + boxH - r);
-                        ctx.lineTo(bx, by + r);
-                        ctx.quadraticCurveTo(bx, by, bx + r, by);
-                        ctx.closePath();
-                        ctx.fill();
-                        ctx.stroke();
-
-                        ctx.fillStyle = "#fff";
-                        ctx.textAlign = "center";
-                        ctx.fillText(textEn, bx + boxW / 2, by + 20);
-                        ctx.fillStyle = "#0f0";
-                        ctx.fillText(textZh, bx + boxW / 2, by + 40);
-                        ctx.restore();
-                    }
                 },
                 computeSize(width) { return [width, -1]; }
             };
@@ -375,17 +379,29 @@ app.registerExtension({
                     const cursors = { move: "move", tl: "nwse-resize", br: "nwse-resize", tr: "nesw-resize", bl: "nesw-resize", t: "ns-resize", b: "ns-resize", l: "ew-resize", r: "ew-resize" };
                     app.canvas.canvas.style.cursor = hit ? cursors[hit] : "default";
 
-                    // Track hovered widget for tooltip
+                    // Track hovered widget for tooltip - improved detection
                     const oldHover = this.hoveredWidget;
                     this.hoveredWidget = null;
-                    if (this.widgets) {
+
+                    // Calculate widget positions more reliably
+                    const titleHeight = LiteGraph.NODE_TITLE_HEIGHT || 30;
+                    const widgetHeight = 20; // Standard widget height
+                    let currentY = titleHeight;
+
+                    if (this.widgets && pos[1] > titleHeight) {
                         for (const w of this.widgets) {
-                            if (w.last_y !== undefined && pos[1] >= w.last_y && pos[1] <= w.last_y + (w.computeSize?.()[1] || 20)) {
+                            // Skip the canvas widget itself
+                            if (w.type === "custom_canvas") continue;
+
+                            const widgetBottom = currentY + widgetHeight;
+                            if (pos[1] >= currentY && pos[1] <= widgetBottom) {
                                 this.hoveredWidget = w;
                                 break;
                             }
+                            currentY = widgetBottom;
                         }
                     }
+
                     if (oldHover !== this.hoveredWidget) this.setDirtyCanvas(true);
 
                     return !!hit;
