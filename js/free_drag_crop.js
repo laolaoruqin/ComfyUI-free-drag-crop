@@ -425,6 +425,16 @@ app.registerExtension({
 
             const curW = Math.round(x2 - x1), curH = Math.round(y2 - y1);
             const pW = Math.round((curW / node.properties.actualImageWidth) * 100), pH = Math.round((curH / node.properties.actualImageHeight) * 100);
+
+            // Draw Center Crosshair (Restored)
+            ctx.strokeStyle = "rgba(170, 255, 0, 0.5)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            const cx = rx + rw / 2, cy = ry + rh / 2;
+            ctx.moveTo(cx - 10, cy); ctx.lineTo(cx + 10, cy);
+            ctx.moveTo(cx, cy - 10); ctx.lineTo(cx, cy + 10);
+            ctx.stroke();
+
             ctx.font = "bold 14px Arial"; ctx.textAlign = "center"; ctx.shadowColor = "black"; ctx.shadowBlur = 4; ctx.fillStyle = "#aaff00";
             ctx.fillText(`${pW} × ${pH} %`, px + pw / 2, py + ph / 2 + 5);
             ctx.fillText(`${curW} × ${curH} px`, px + pw / 2, py + ph / 2 + 22);
