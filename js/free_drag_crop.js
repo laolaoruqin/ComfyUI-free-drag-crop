@@ -250,7 +250,7 @@ app.registerExtension({
             node.addWidget("combo", "Ratio Presets", "Custom", (v) => {
                 const ar = node.widgets.find(w => w.name === "aspect_ratio");
                 if (ar && v !== "Custom") { ar.value = v; node.applyAspectRatio(v); }
-            }, { values: ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2", "21:9", "Custom"] });
+            }, { values: ["1:1", "4:3", "3:4", "16:9", "9:16", "9:20", "2:3", "3:2", "21:9", "Custom"] });
 
             // Ratio Presets positioning
             const arIdx = node.widgets.findIndex(w => w.name === "aspect_ratio");

@@ -15,7 +15,7 @@ A professional, high-precision interactive cropping node for ComfyUI. Drag, resi
 - **Interactive Canvas**: Drag to select, resize from 8-point handles, or move the entire selection area.
 - **Real-Pixel Precision**: All calculations are based on original image dimensions to prevent rounding errors or resolution drifts.
 - **Aspect Ratio Locking**: Lock your selection to a specific ratio (e.g., 16:9, 1:1) and adjust boundaries while maintaining the frame.
-- **Smart Presets**: Quick access to common ratios (4:3, 9:16, 21:9, etc.).
+- **Smart Presets**: Quick access to common ratios (4:3, 9:16, 9:20, 21:9, etc.).
 - **Smart Resets**:
   - **Full Image Crop**: Expand to the maximum possible coverage for the current ratio.
   - **No Crop**: Reset to origin with 1x1 pixel selection (ideal for bypassing crop logic).
@@ -46,7 +46,7 @@ A professional, high-precision interactive cropping node for ComfyUI. Drag, resi
 - **交互式画板**：支持 8 点缩放、整体移动和拖拽选择。
 - **真实像素精度**：所有计算均基于原图尺寸，彻底杜绝舍入误差造成的选区偏移。
 - **比例锁定**：支持一键开启比例锁定（如 16:9），并在缩放边界时自动维持该比例。
-- **比例预设**：内置常用比例（1:1, 4:3, 3:2, 21:9 等）快速切换。
+- **比例预设**：内置常用比例（1:1, 4:3, 9:16, 9:20, 21:9 等）快速切换。
 - **智能重置**：
   - **Full Image Crop (全图自适应)**：在当前比例下自动扩展至最大选区。
   - **No Crop (清空裁剪)**：一键归零，恢复至初始状态。
