@@ -99,6 +99,7 @@ app.registerExtension({
 
             this.image.onload = () => {
                 this.imageLoaded = true;
+                this.syncWidgetsFromProperties(true);
                 this.setDirtyCanvas(true);
             };
 
@@ -143,15 +144,12 @@ app.registerExtension({
             const wasSyncing = this._isSyncing;
             this._isSyncing = true;
             try {
-                const find = (n) => this.widgets.find(w => w.name === n);
-                const imgW = this.properties.actualImageWidth, imgH = this.properties.actualImageHeight;
+                const find = (n) => (this.widgets || []).find(w => w.name === n || w.label === n);
+                // 优先级：服务器记录尺寸 > 预览图原始尺寸 > 默认1024
+                const imgW = this.properties.actualImageWidth || (this.image && this.image.width > 0 ? this.image.width : 1024);
+                const imgH = this.properties.actualImageHeight || (this.image && this.image.height > 0 ? this.image.height : 1024);
 
-                if (!this.imageLoaded || imgW === 0) {
-                    ["crop_left", "crop_right", "crop_top", "crop_bottom", "crop_current_width", "crop_current_height"].forEach(n => {
-                        const w = find(n); if (w && w.value !== 0) w.value = 0;
-                    });
-                    return;
-                }
+                if (imgW === 0) return;
 
                 const [x1, y1] = this.properties.dragStart, [x2, y2] = this.properties.dragEnd;
                 const setIfChanged = (n, val) => {
@@ -192,8 +190,11 @@ app.registerExtension({
             if (this._isSyncing) return;
             this._isSyncing = true;
             try {
-                const find = (n) => this.widgets.find(w => w.name === n);
-                const imgW = this.properties.actualImageWidth, imgH = this.properties.actualImageHeight;
+                const find = (n) => (this.widgets || []).find(w => w.name === n || w.label === n);
+                const imgW = this.properties.actualImageWidth;
+                const imgH = this.properties.actualImageHeight;
+                if (!imgW || !imgH) return;
+
                 const l = find("crop_left")?.value || 0, r = find("crop_right")?.value || 0;
                 const t = find("crop_top")?.value || 0, b = find("crop_bottom")?.value || 0;
                 this.properties.dragStart = [l, t];
@@ -206,18 +207,19 @@ app.registerExtension({
             if (this._isSyncing) return;
             this._isSyncing = true;
             try {
-                const imgW = this.properties.actualImageWidth, imgH = this.properties.actualImageHeight;
-                if (!imgW) return;
-                const arWidget = this.widgets.find(w => w.name === "aspect_ratio");
-                const lockWidget = this.widgets.find(w => w.name === "ratio_lock");
+                const find = (n) => (this.widgets || []).find(w => w.name === n || w.label === n);
+                const imgW = this.properties.actualImageWidth;
+                const imgH = this.properties.actualImageHeight;
+                if (!imgW || !imgH) return;
+
+                const arWidget = find("aspect_ratio");
+                const lockWidget = find("ratio_lock");
 
                 if (val === "NoCrop") {
                     if (arWidget) arWidget.value = "1:1";
-                    if (lockWidget) lockWidget.value = false;
                     this.properties.dragStart = [0, 0]; this.properties.dragEnd = [1, 1];
                 } else if (val === "Full") {
                     if (arWidget) arWidget.value = `${imgW}:${imgH}`;
-                    if (lockWidget) lockWidget.value = false;
                     this.properties.dragStart = [0, 0]; this.properties.dragEnd = [imgW, imgH];
                 } else {
                     if (val && arWidget && val !== "Full" && val !== "NoCrop") arWidget.value = val;
@@ -479,7 +481,14 @@ app.registerExtension({
                 if (message.orig_size) {
                     const [newW, newH] = message.orig_size, oldW = this.properties.actualImageWidth, oldH = this.properties.actualImageHeight;
                     this.properties.actualImageWidth = newW; this.properties.actualImageHeight = newH;
-                    if (newW !== oldW || newH !== oldH) this.applyAspectRatio("Full");
+                    const lock = this.widgets.find(w => w.name === "ratio_lock")?.value;
+                    if (newW !== oldW || newH !== oldH) {
+                        if (lock) {
+                            this.applyAspectRatio();
+                        } else {
+                            this.applyAspectRatio("Full");
+                        }
+                    }
                 }
                 if (message.preview_scale) this.previewScale = Array.isArray(message.preview_scale) ? message.preview_scale[0] : message.preview_scale;
                 this.image.src = url; this.imageLoaded = false; this.setDirtyCanvas(true);
