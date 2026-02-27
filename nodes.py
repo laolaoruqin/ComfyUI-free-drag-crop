@@ -28,6 +28,8 @@ class FreeDragCrop:
                 "crop_current_height": ("INT", {"default": 512, "min": 0, "max": 16384, "step": 1}),
                 "aspect_ratio": ("STRING", {"default": "16:9"}),
                 "ratio_lock": ("BOOLEAN", {"default": True}),
+                "crop_center_x": ("INT", {"default": 256, "min": 0, "max": 16384, "step": 1}),
+                "crop_center_y": ("INT", {"default": 256, "min": 0, "max": 16384, "step": 1}),
                 "mask": ("MASK",),
             }
         }
@@ -39,6 +41,7 @@ class FreeDragCrop:
 
     def execute_crop(self, image: torch.Tensor, crop_left: int, crop_right: int, crop_top: int, crop_bottom: int, 
                      crop_current_width: int = 512, crop_current_height: int = 512, 
+                     crop_center_x: int = 256, crop_center_y: int = 256,
                      aspect_ratio: str = "1:1", ratio_lock: bool = False, mask: torch.Tensor = None):
         """
         Performs the actual cropping operation on the input tensor based on UI coordinates.

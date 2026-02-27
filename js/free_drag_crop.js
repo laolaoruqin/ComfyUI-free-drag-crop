@@ -59,6 +59,8 @@ const HELP_DESCRIPTIONS = [
     { icon: "⬇️", name: "Bottom Crop", zh: "下剪裁", desc: "Remove pixels from the bottom", zh_desc: "从底部剪裁" },
     { icon: "↔️", name: "Current Width", zh: "当前宽度", desc: "The width of the selection box in pixels", zh_desc: "当前选区的宽度（像素）" },
     { icon: "↕️", name: "Current Height", zh: "当前高度", desc: "The height of the selection box in pixels", zh_desc: "当前选区的高度（像素）" },
+    { icon: "🕳️", name: "Center X", zh: "中心 X", desc: "The X coordinate of the center point", zh_desc: "中心点的 X 坐标" },
+    { icon: "🕳️", name: "Center Y", zh: "中心 Y", desc: "The Y coordinate of the center point", zh_desc: "中心点的 Y 坐标" },
     { icon: "📐", name: "Aspect Ratio", zh: "宽高比", desc: "Set a specific width-to-height ratio", zh_desc: "设置特定的宽高比例" },
     { icon: "📄", name: "Presets", zh: "预设", desc: "Quickly apply standard aspect ratios", zh_desc: "快速应用标准宽高比" },
     { icon: "🔒", name: "Ratio Lock", zh: "锁定比例", desc: "Maintain the aspect ratio during resize", zh_desc: "调整大小时保持宽高比" },
@@ -165,6 +167,9 @@ app.registerExtension({
                 const curW = Math.abs(x2 - x1), curH = Math.abs(y2 - y1);
                 setIfChanged("crop_current_width", curW);
                 setIfChanged("crop_current_height", curH);
+
+                setIfChanged("crop_center_x", Math.round(x1 + curW / 2));
+                setIfChanged("crop_center_y", Math.round(y1 + curH / 2));
 
                 // Sync Labels & Presets
                 const arWidget = find("aspect_ratio"), lockWidget = find("ratio_lock"), presetWidget = find("Ratio Presets");
@@ -468,6 +473,19 @@ app.registerExtension({
                 }
                 this.properties.dragStart = [Math.max(0, cx - nw / 2), Math.max(0, cy - nh / 2)];
                 this.properties.dragEnd = [this.properties.dragStart[0] + nw, this.properties.dragStart[1] + nh];
+                this.syncWidgetsFromProperties(true);
+            } else if (name === "crop_center_x" || name === "crop_center_y") {
+                const [x1, y1] = this.properties.dragStart, [x2, y2] = this.properties.dragEnd;
+                const curW = Math.abs(x2 - x1), curH = Math.abs(y2 - y1);
+                const imgW = this.properties.actualImageWidth, imgH = this.properties.actualImageHeight;
+                let cx = (name === "crop_center_x") ? val : Math.round(x1 + curW / 2);
+                let cy = (name === "crop_center_y") ? val : Math.round(y1 + curH / 2);
+                
+                cx = Math.max(curW / 2, Math.min(imgW - curW / 2, cx));
+                cy = Math.max(curH / 2, Math.min(imgH - curH / 2, cy));
+                
+                this.properties.dragStart = [Math.round(cx - curW / 2), Math.round(cy - curH / 2)];
+                this.properties.dragEnd = [Math.round(cx + curW / 2), Math.round(cy + curH / 2)];
                 this.syncWidgetsFromProperties(true);
             } else if (name === "aspect_ratio") {
                 const p = find("Ratio Presets"); if (p && p.value !== val) p.value = p.options.values.includes(val) ? val : "Custom";
