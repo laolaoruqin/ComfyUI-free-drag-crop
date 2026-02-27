@@ -26,10 +26,10 @@ class FreeDragCrop:
             "optional": {
                 "crop_current_width": ("INT", {"default": 512, "min": 0, "max": 16384, "step": 1}),
                 "crop_current_height": ("INT", {"default": 512, "min": 0, "max": 16384, "step": 1}),
-                "aspect_ratio": ("STRING", {"default": "16:9"}),
-                "ratio_lock": ("BOOLEAN", {"default": True}),
                 "crop_center_x": ("INT", {"default": 256, "min": 0, "max": 16384, "step": 1}),
                 "crop_center_y": ("INT", {"default": 256, "min": 0, "max": 16384, "step": 1}),
+                "aspect_ratio": ("STRING", {"default": "16:9"}),
+                "ratio_lock": ("BOOLEAN", {"default": True}),
                 "mask": ("MASK",),
             }
         }
