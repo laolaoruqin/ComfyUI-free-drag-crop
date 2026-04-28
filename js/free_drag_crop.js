@@ -102,6 +102,15 @@ app.registerExtension({
             this.image.onload = () => {
                 this.imageLoaded = true;
                 this.syncWidgetsFromProperties(true);
+
+                // Auto-resize node to fully contain the preview canvas.
+                // LiteGraph only dispatches mouse events within node bounds,
+                // so the preview must never overflow the node boundary.
+                const minSize = this.computeSize();
+                if (this.size[1] < minSize[1]) {
+                    this.size[1] = minSize[1];
+                }
+
                 this.setDirtyCanvas(true);
             };
 
@@ -135,7 +144,32 @@ app.registerExtension({
             const canvasWidget = {
                 type: "custom_canvas", name: "crop_preview",
                 draw: (ctx, node, width, y) => this._drawPreviewCanvas(ctx, node, width, y),
-                computeSize: (width) => [width, -1]
+                computeSize: function(width) {
+                    // Return proper height so LiteGraph auto-sizes the node.
+                    // Returning -1 caused LiteGraph to not allocate enough space,
+                    // leading to preview overflow and broken mouse events.
+                    const margin = 10;
+                    const drawW = width - margin * 2;
+                    if (node.imageLoaded && node.image && node.image.width > 0 && node.image.height > 0) {
+                        const imgAR = node.image.width / node.image.height;
+                        const imageH = drawW / imgAR;
+                        return [width, Math.max(200, imageH + margin * 2)];
+                    }
+                    return [width, 200];
+                },
+                // Forward mouse events from widget to node handlers.
+                // LiteGraph may route mouse events to the widget instead of node.onMouseDown/Move/Up
+                // when the mouse is within the widget's area. Without this, events get silently swallowed.
+                mouse: function (event, pos, graphNode) {
+                    if (event.type === "pointerdown" || event.type === "mousedown") {
+                        return graphNode.onMouseDown?.(event, pos) || false;
+                    } else if (event.type === "pointermove" || event.type === "mousemove") {
+                        return graphNode.onMouseMove?.(event, pos) || false;
+                    } else if (event.type === "pointerup" || event.type === "mouseup") {
+                        return graphNode.onMouseUp?.(event, pos) || false;
+                    }
+                    return false;
+                }
             };
             node.addCustomWidget(canvasWidget);
         };
@@ -413,7 +447,11 @@ app.registerExtension({
         };
 
         proto._drawPreviewCanvas = function (ctx, node, width, y) {
-            const margin = 10, drawW = width - margin * 2, drawH = Math.max(150, node.size[1] - y - margin * 2), startY = y + margin;
+            const margin = 10, drawW = width - margin * 2;
+            // Use remaining node space for preview. Do NOT use Math.max(150, ...)
+            // which would overflow the node boundary and break mouse events.
+            const drawH = Math.max(50, node.size[1] - y - margin * 2);
+            const startY = y + margin;
             ctx.fillStyle = "#161616"; ctx.fillRect(margin, startY, drawW, drawH);
 
             if (!node.imageLoaded) { ctx.fillStyle = "#666"; ctx.textAlign = "center"; ctx.fillText("No Image", margin + drawW / 2, startY + drawH / 2); return; }
